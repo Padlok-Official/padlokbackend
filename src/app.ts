@@ -7,6 +7,7 @@ import morgan from 'morgan';
 import db from './config/database';
 import authRoutes from './routes/authRoutes';
 import userRoutes from './routes/userRoutes';
+import otpRoutes from './routes/otpRoutes';
 import { generalLimiter } from './middleware/security';
 import { errorHandler } from './middleware/errorHandler';
 
