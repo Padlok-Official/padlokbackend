@@ -103,13 +103,13 @@ export const UserModel = {
   async isPhoneNumberTaken(phoneNumber: string, excludeUserId?: string): Promise<boolean> {
     const { rows } = excludeUserId
       ? await db.query<{ id: string }>(
-          'SELECT id FROM users WHERE phone_number = $1 AND id != $2',
-          [phoneNumber.trim(), excludeUserId]
-        )
+        'SELECT id FROM users WHERE phone_number = $1 AND id != $2',
+        [phoneNumber.trim(), excludeUserId]
+      )
       : await db.query<{ id: string }>(
-          'SELECT id FROM users WHERE phone_number = $1',
-          [phoneNumber.trim()]
-        );
+        'SELECT id FROM users WHERE phone_number = $1',
+        [phoneNumber.trim()]
+      );
     return rows.length > 0;
   },
 
