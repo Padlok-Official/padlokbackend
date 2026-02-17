@@ -34,7 +34,8 @@ export const register = async (
   next: NextFunction
 ): Promise<void | Response> => {
   try {
-    const { name, email, password, phone_number } = req.body;
+    const { name, email, password, phoneNumber } = req.body;
+    const phone_number = phoneNumber;
 
     const existing = await UserModel.findByEmailOrPhone(
       email,
