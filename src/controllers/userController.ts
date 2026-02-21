@@ -1,4 +1,4 @@
-import { Response, NextFunction } from 'express';
+import { NextFunction, Response } from 'express';
 import { UserModel, WalletModel } from '../models';
 import { AuthenticatedRequest } from '../types';
 
@@ -20,11 +20,11 @@ export const getProfile = async (
         user: req.user,
         wallet: wallet
           ? {
-              id: wallet.id,
-              balance: wallet.balance,
-              currency: wallet.currency,
-              status: wallet.status,
-            }
+            id: wallet.id,
+            balance: wallet.balance,
+            currency: wallet.currency,
+            status: wallet.status,
+          }
           : null,
       },
     });
@@ -120,6 +120,36 @@ export const changePassword = async (
     await UserModel.updatePassword(req.user.id, password_hash);
 
     res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateFcmToken = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { token } = req.body;
+
+    if (token !== null && typeof token !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid token format',
+      });
+    }
+
+    await UserModel.updateFcmToken(req.user.id, token);
+
+    res.json({
+      success: true,
+      message: 'FCM token updated successfully',
+    });
   } catch (err) {
     next(err);
   }

@@ -8,6 +8,7 @@ export interface User {
   email_verified: boolean;
   phone_verified: boolean;
   is_active: boolean;
+  fcm_token?: string;
   created_at: Date;
 }
 

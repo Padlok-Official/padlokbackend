@@ -1,15 +1,16 @@
 import { Router } from 'express';
 import {
-  getProfile,
-  updateProfile,
   changePassword,
+  getProfile,
+  updateFcmToken,
+  updateProfile,
 } from '../controllers/userController';
-import {
-  updateProfileValidator,
-  changePasswordValidator,
-} from '../validators/userValidators';
-import { handleValidationErrors } from '../middleware/validation';
 import { authenticate } from '../middleware/auth';
+import { handleValidationErrors } from '../middleware/validation';
+import {
+  changePasswordValidator,
+  updateProfileValidator,
+} from '../validators/userValidators';
 
 const router = Router();
 
@@ -30,5 +31,7 @@ router.post(
   handleValidationErrors,
   changePassword
 );
+
+router.put('/fcm-token', updateFcmToken);
 
 export default router;

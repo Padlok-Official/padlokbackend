@@ -7,7 +7,7 @@ const SALT_ROUNDS = 12;
 export const UserModel = {
   async findByEmail(email: string): Promise<(User & { password_hash: string; last_login_at: Date | null }) | null> {
     const { rows } = await db.query<User & { password_hash: string; last_login_at: Date | null }>(
-      `SELECT id, name, email, phone_number, password_hash, email_verified, phone_verified, is_active, created_at, last_login_at
+      `SELECT id, name, email, phone_number, password_hash, email_verified, phone_verified, is_active, fcm_token, created_at, last_login_at
        FROM users WHERE email = $1 AND is_active = TRUE`,
       [email.toLowerCase().trim()]
     );
@@ -24,7 +24,7 @@ export const UserModel = {
 
   async findById(id: string): Promise<User | null> {
     const { rows } = await db.query<User>(
-      `SELECT id, name, email, phone_number, email_verified, phone_verified, is_active, created_at
+      `SELECT id, name, email, phone_number, email_verified, phone_verified, is_active, fcm_token, created_at
        FROM users WHERE id = $1 AND is_active = TRUE`,
       [id]
     );
@@ -33,7 +33,7 @@ export const UserModel = {
 
   async findByIdWithPassword(id: string): Promise<(User & { password_hash: string }) | null> {
     const { rows } = await db.query<User & { password_hash: string }>(
-      `SELECT id, name, email, phone_number, password_hash, email_verified, phone_verified, is_active, created_at
+      `SELECT id, name, email, phone_number, password_hash, email_verified, phone_verified, is_active, fcm_token, created_at
        FROM users WHERE id = $1`,
       [id]
     );
@@ -49,7 +49,7 @@ export const UserModel = {
     const { rows } = await db.query<User>(
       `INSERT INTO users (name, email, password_hash, phone_number)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, name, email, phone_number, email_verified, phone_verified, is_active, created_at`,
+       RETURNING id, name, email, phone_number, email_verified, phone_verified, is_active, fcm_token, created_at`,
       [
         data.name.trim(),
         data.email.toLowerCase().trim(),
@@ -83,7 +83,7 @@ export const UserModel = {
     const { rows } = await db.query<User>(
       `UPDATE users SET ${setClauses.join(', ')}, updated_at = NOW()
        WHERE id = $${idx}
-       RETURNING id, name, email, phone_number, email_verified, phone_verified, is_active, created_at`,
+       RETURNING id, name, email, phone_number, email_verified, phone_verified, is_active, fcm_token, created_at`,
       values
     );
     return rows[0] ?? null;
@@ -98,6 +98,13 @@ export const UserModel = {
 
   async updateLastLogin(id: string): Promise<void> {
     await db.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [id]);
+  },
+
+  async updateFcmToken(id: string, token: string | null): Promise<void> {
+    await db.query(
+      'UPDATE users SET fcm_token = $1, updated_at = NOW() WHERE id = $2',
+      [token, id]
+    );
   },
 
   async isPhoneNumberTaken(phoneNumber: string, excludeUserId?: string): Promise<boolean> {
