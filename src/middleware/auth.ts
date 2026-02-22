@@ -46,3 +46,17 @@ export const authenticate = async (
     next(err);
   }
 };
+
+export const isAdmin = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void | Response => {
+  if (!req.user || !(req.user as any).is_admin) {
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied: Admin privileges required',
+    });
+  }
+  next();
+};

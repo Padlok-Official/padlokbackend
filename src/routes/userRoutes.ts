@@ -17,6 +17,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/me', getProfile);
+router.get('/profile', getProfile);
 
 router.patch(
   '/me',

@@ -46,7 +46,7 @@ class Database {
         }),
       };
     } else {
-      console.error('❌ No database configuration found!');
+      console.error('No database configuration found!');
       console.error(
         '💡 Please set either DATABASE_URL or DB_HOST, DB_NAME, DB_USER, DB_PASSWORD'
       );
@@ -62,10 +62,10 @@ class Database {
 
     try {
       await this.pool.query('SELECT NOW()');
-      console.log('✅ Database pool created successfully');
+      console.log('Database pool created successfully');
     } catch (err: unknown) {
       const error = err as NodeJS.ErrnoException;
-      console.error('❌ Error connecting to database:', error.message);
+      console.error('Error connecting to database:', error.message);
 
       if (error.code === 'ENOTFOUND') {
         console.error('💡 DNS resolution failed. Check hostname and network.');

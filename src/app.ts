@@ -1,15 +1,16 @@
-import express from 'express';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import express from 'express';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import db from './config/database';
-import authRoutes from './routes/authRoutes';
-import userRoutes from './routes/userRoutes';
-import otpRoutes from './routes/otpRoutes';
-import { generalLimiter } from './middleware/security';
 import { errorHandler } from './middleware/errorHandler';
+import { generalLimiter } from './middleware/security';
+import authRoutes from './routes/authRoutes';
+import otpRoutes from './routes/otpRoutes';
+import userRoutes from './routes/userRoutes';
+import adminRoutes from './routes/adminRoutes';
 
 const app = express();
 
@@ -34,8 +35,9 @@ app.use(
 app.use(generalLimiter);
 
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/user', userRoutes);
 app.use('/api/v1/otp', otpRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 app.get('/health', async (_req, res) => {
   try {

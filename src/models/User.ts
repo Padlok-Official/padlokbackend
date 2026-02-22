@@ -102,7 +102,7 @@ export const UserModel = {
 
   async updateFcmToken(id: string, token: string | null): Promise<void> {
     await db.query(
-      'UPDATE users SET fcm_token = $1, updated_at = NOW() WHERE id = $2',
+      'UPDATE users SET fcm_token = $1, updated_at = NOW() WHERE id = $2 AND (fcm_token IS DISTINCT FROM $1)',
       [token, id]
     );
   },
@@ -126,5 +126,19 @@ export const UserModel = {
 
   comparePassword(password: string, hash: string): Promise<boolean> {
     return bcrypt.compare(password, hash);
+  },
+  async getAllFcmTokens(limit: number, offset: number): Promise<string[]> {
+    const { rows } = await db.query<{ fcm_token: string }>(
+      'SELECT fcm_token FROM users WHERE is_active = TRUE AND fcm_token IS NOT NULL LIMIT $1 OFFSET $2',
+      [limit, offset]
+    );
+    return rows.map(r => r.fcm_token);
+  },
+
+  async countWithFcmToken(): Promise<number> {
+    const { rows } = await db.query<{ count: string }>(
+      'SELECT COUNT(*) FROM users WHERE is_active = TRUE AND fcm_token IS NOT NULL'
+    );
+    return parseInt(rows[0].count, 10);
   },
 };
