@@ -11,6 +11,7 @@ import authRoutes from './routes/authRoutes';
 import otpRoutes from './routes/otpRoutes';
 import userRoutes from './routes/userRoutes';
 import adminRoutes from './routes/adminRoutes';
+import walletRoutes from './routes/walletRoute';
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use(generalLimiter);
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/user', userRoutes);
+app.use('/api/v1/wallet', walletRoutes);
 app.use('/api/v1/otp', otpRoutes);
 app.use('/api/v1/admin', adminRoutes);
 

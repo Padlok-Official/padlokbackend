@@ -2,7 +2,7 @@ import 'dotenv/config';
 import app from './app';
 import db from './config/database';
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 6000;
 
 process.on('uncaughtException', (error: Error) => {
   console.error('Uncaught Exception:', error);
