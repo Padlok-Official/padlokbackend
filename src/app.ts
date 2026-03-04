@@ -12,8 +12,15 @@ import otpRoutes from './routes/otpRoutes';
 import userRoutes from './routes/userRoutes';
 import adminRoutes from './routes/adminRoutes';
 import walletRoutes from './routes/walletRoute';
+import escrowRoutes from './routes/escrowRoutes';
+import paymentMethodRoutes from './routes/paymentMethodRoutes';
+import webhookRoutes from './routes/webhookRoutes';
 
 const app = express();
+
+// Webhook routes MUST be registered BEFORE express.json() middleware
+// because Paystack webhook needs the raw body for HMAC signature verification
+app.use('/api/v1/webhooks', webhookRoutes);
 
 app.use(helmet());
 app.use(
@@ -38,6 +45,8 @@ app.use(generalLimiter);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/user', userRoutes);
 app.use('/api/v1/wallet', walletRoutes);
+app.use('/api/v1/escrow', escrowRoutes);
+app.use('/api/v1/payment-methods', paymentMethodRoutes);
 app.use('/api/v1/otp', otpRoutes);
 app.use('/api/v1/admin', adminRoutes);
 

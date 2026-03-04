@@ -55,3 +55,133 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   errors?: Array<{ field: string; message: string }>;
 }
+
+// Extended wallet with PIN and spending limit fields
+export interface WalletWithPin extends Wallet {
+  pin_hash?: string;
+  pin_set_at?: Date;
+  pin_attempts: number;
+  pin_locked_until?: Date;
+  daily_limit: string;
+  monthly_limit: string;
+  daily_spent: string;
+  monthly_spent: string;
+  daily_spent_reset_at: string;
+  monthly_spent_reset_at: string;
+}
+
+// Escrow transaction between buyer and seller
+export interface EscrowTransaction {
+  id: string;
+  reference: string;
+  buyer_id: string;
+  seller_id: string;
+  buyer_wallet_id: string;
+  seller_wallet_id: string;
+  item_description: string;
+  item_photos: string[];
+  price: string;
+  fee: string;
+  currency: string;
+  status: 'initiated' | 'funded' | 'delivery_confirmed' | 'completed' | 'disputed' | 'refunded' | 'cancelled';
+  paystack_reference?: string;
+  paystack_transfer_code?: string;
+  delivery_confirmed_at?: Date;
+  delivery_deadline?: Date;
+  buyer_confirmed_at?: Date;
+  metadata?: Record<string, unknown>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// Wallet ledger entry (funding, withdrawal, escrow lock/release)
+export interface WalletTransaction {
+  id: string;
+  wallet_id: string;
+  type: 'funding' | 'withdrawal' | 'escrow_lock' | 'escrow_release' | 'escrow_refund';
+  amount: string;
+  fee: string;
+  balance_before: string;
+  balance_after: string;
+  currency: string;
+  status: 'pending' | 'completed' | 'failed' | 'reversed';
+  reference: string;
+  paystack_reference?: string;
+  escrow_transaction_id?: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// Dispute raised on an escrow transaction
+export interface Dispute {
+  id: string;
+  escrow_transaction_id: string;
+  raised_by: string;
+  reason: string;
+  evidence_photos: string[];
+  status: 'open' | 'under_review' | 'resolved_refund' | 'resolved_release' | 'closed';
+  admin_id?: string;
+  admin_notes?: string;
+  resolved_at?: Date;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// Idempotency key for preventing double-processing
+export interface IdempotencyKey {
+  id: string;
+  key: string;
+  user_id: string;
+  request_path: string;
+  request_body_hash: string;
+  response_status?: number;
+  response_body?: Record<string, unknown>;
+  created_at: Date;
+  expires_at: Date;
+}
+
+// Audit log entry
+export interface AuditLogEntry {
+  id: string;
+  user_id?: string;
+  action: string;
+  entity_type: string;
+  entity_id?: string;
+  details?: Record<string, unknown>;
+  ip_address?: string;
+  user_agent?: string;
+  created_at: Date;
+}
+
+// Paystack webhook event payload
+export interface PaystackWebhookEvent {
+  event: string;
+  data: {
+    reference: string;
+    amount: number;
+    currency: string;
+    status: string;
+    channel: string;
+    authorization?: {
+      authorization_code: string;
+      card_type: string;
+      last4: string;
+      exp_month: string;
+      exp_year: string;
+      bin: string;
+      bank: string;
+      reusable: boolean;
+    };
+    customer: {
+      email: string;
+    };
+    metadata?: Record<string, unknown>;
+  };
+}
+
+// Request with wallet attached by middleware
+export interface WalletRequest extends AuthenticatedRequest {
+  wallet?: Wallet;
+}

@@ -1,3 +1,9 @@
 export { UserModel } from './User';
 export { WalletModel } from './Wallet';
 export { RefreshTokenModel } from './RefreshToken';
+export { EscrowTransactionModel } from './EscrowTransaction';
+export { WalletTransactionModel } from './WalletTransaction';
+export { PaymentMethodModel } from './PaymentMethod';
+export { DisputeModel } from './Dispute';
+export { IdempotencyKeyModel } from './IdempotencyKey';
+export { AuditLogModel } from './AuditLog';
