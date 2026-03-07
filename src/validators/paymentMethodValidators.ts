@@ -1,42 +1,36 @@
-import { body, param } from 'express-validator';
+import { body, param } from "express-validator";
 
 export const addBankAccountValidator = [
-  body('bank_code')
-    .notEmpty()
-    .withMessage('Bank code is required'),
-  body('account_number')
-    .isLength({ min: 10, max: 10 })
-    .withMessage('Account number must be 10 digits')
-    .matches(/^\d{10}$/)
-    .withMessage('Account number must contain only digits'),
+  body("bank_code").notEmpty().withMessage("Bank code is required"),
+  body("account_number")
+    .isLength({ min: 10, max: 14 })
+    .withMessage("Account number must be between 10 and 14 digits")
+    .matches(/^\d{10,14}$/)
+    .withMessage("Account number must contain only digits"),
 ];
 
 export const addMobileMoneyValidator = [
-  body('provider')
+  body("provider")
     .notEmpty()
-    .withMessage('Mobile money provider is required')
-    .isIn(['mtn', 'airtel', 'vodafone'])
-    .withMessage('Provider must be one of: mtn, airtel, vodafone'),
-  body('phone_number')
+    .withMessage("Mobile money provider is required")
+    .isIn(["mtn", "airtel", "vodafone"])
+    .withMessage("Provider must be one of: mtn, airtel, vodafone"),
+  body("phone_number")
     .notEmpty()
-    .withMessage('Phone number is required')
+    .withMessage("Phone number is required")
     .isLength({ min: 10, max: 10 })
-    .withMessage('Phone number must be 10 digits')
+    .withMessage("Phone number must be 10 digits")
     .matches(/^\d{10}$/)
-    .withMessage('Phone number must contain only digits'),
-  body('account_name')
+    .withMessage("Phone number must contain only digits"),
+  body("account_name")
     .notEmpty()
-    .withMessage('Account holder name is required'),
+    .withMessage("Account holder name is required"),
 ];
 
 export const setDefaultValidator = [
-  param('id')
-    .isUUID()
-    .withMessage('Valid payment method ID is required'),
+  param("id").isUUID().withMessage("Valid payment method ID is required"),
 ];
 
 export const deletePaymentMethodValidator = [
-  param('id')
-    .isUUID()
-    .withMessage('Valid payment method ID is required'),
+  param("id").isUUID().withMessage("Valid payment method ID is required"),
 ];

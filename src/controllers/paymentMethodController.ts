@@ -133,10 +133,15 @@ export const addMobileMoney = async (
       });
       recipientCode = recipient.recipient_code;
     } catch (err: any) {
-      console.error("Paystack mobile money recipient error:", err?.response?.data || err?.message);
+      console.error(
+        "Paystack mobile money recipient error:",
+        err?.response?.data || err?.message,
+      );
       return res.status(500).json({
         success: false,
-        message: err?.response?.data?.message || "Failed to create mobile money recipient. Please try again.",
+        message:
+          err?.response?.data?.message ||
+          "Failed to create mobile money recipient. Please try again.",
       });
     }
 

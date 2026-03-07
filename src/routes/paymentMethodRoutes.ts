@@ -1,9 +1,9 @@
-import { Router } from 'express';
-import { authenticate } from '../middleware/auth';
-import { requireWallet } from '../middleware/walletOwnership';
-import { handleValidationErrors } from '../middleware/validation';
-import * as paymentMethodController from '../controllers/paymentMethodController';
-import * as validators from '../validators/paymentMethodValidators';
+import { Router } from "express";
+import { authenticate } from "../middleware/auth";
+import { requireWallet } from "../middleware/walletOwnership";
+import { handleValidationErrors } from "../middleware/validation";
+import * as paymentMethodController from "../controllers/paymentMethodController";
+import * as validators from "../validators/paymentMethodValidators";
 
 const router = Router();
 
@@ -11,41 +11,41 @@ const router = Router();
 router.use(authenticate, requireWallet);
 
 // GET /api/v1/payment-methods - List my payment methods
-router.get('/', paymentMethodController.getPaymentMethods);
+router.get("/", paymentMethodController.getPaymentMethods);
 
 // GET /api/v1/payment-methods/banks - List supported banks
-router.get('/banks', paymentMethodController.listBanks);
+router.get("/banks", paymentMethodController.listBanks);
 
 // POST /api/v1/payment-methods/bank - Add bank account
 router.post(
-  '/bank',
+  "/bank",
   validators.addBankAccountValidator,
   handleValidationErrors,
-  paymentMethodController.addBankAccount
+  paymentMethodController.addBankAccount,
 );
 
 // POST /api/v1/payment-methods/mobile-money - Add mobile money account
 router.post(
-  '/mobile-money',
+  "/mobile-money",
   validators.addMobileMoneyValidator,
   handleValidationErrors,
-  paymentMethodController.addMobileMoney
+  paymentMethodController.addMobileMoney,
 );
 
 // PUT /api/v1/payment-methods/:id/default - Set as default
 router.put(
-  '/:id/default',
+  "/:id/default",
   validators.setDefaultValidator,
   handleValidationErrors,
-  paymentMethodController.setDefault
+  paymentMethodController.setDefault,
 );
 
 // DELETE /api/v1/payment-methods/:id - Remove payment method
 router.delete(
-  '/:id',
+  "/:id",
   validators.deletePaymentMethodValidator,
   handleValidationErrors,
-  paymentMethodController.deletePaymentMethod
+  paymentMethodController.deletePaymentMethod,
 );
 
 export default router;

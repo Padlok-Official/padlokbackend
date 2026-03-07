@@ -1,15 +1,15 @@
-import axios, { AxiosInstance } from 'axios';
-import crypto from 'crypto';
+import axios, { AxiosInstance } from "axios";
+import crypto from "crypto";
 
 class PaystackService {
   private client: AxiosInstance;
 
   constructor() {
     this.client = axios.create({
-      baseURL: 'https://api.paystack.co',
+      baseURL: "https://api.paystack.co",
       headers: {
         Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       timeout: 30000,
     });
@@ -25,9 +25,14 @@ class PaystackService {
     reference: string;
     callback_url?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<{ authorization_url: string; access_code: string; reference: string }> {
-    const { data } = await this.client.post('/transaction/initialize', params);
-    if (!data.status) throw new Error(data.message || 'Paystack initialization failed');
+  }): Promise<{
+    authorization_url: string;
+    access_code: string;
+    reference: string;
+  }> {
+    const { data } = await this.client.post("/transaction/initialize", params);
+    if (!data.status)
+      throw new Error(data.message || "Paystack initialization failed");
     return data.data;
   }
 
@@ -53,8 +58,11 @@ class PaystackService {
     customer: { email: string };
     metadata?: Record<string, unknown>;
   }> {
-    const { data } = await this.client.get(`/transaction/verify/${encodeURIComponent(reference)}`);
-    if (!data.status) throw new Error(data.message || 'Paystack verification failed');
+    const { data } = await this.client.get(
+      `/transaction/verify/${encodeURIComponent(reference)}`,
+    );
+    if (!data.status)
+      throw new Error(data.message || "Paystack verification failed");
     return data.data;
   }
 
@@ -63,23 +71,26 @@ class PaystackService {
    */
   async resolveBankAccount(
     accountNumber: string,
-    bankCode: string
+    bankCode: string,
   ): Promise<{ account_name: string; account_number: string }> {
-    const { data } = await this.client.get('/bank/resolve', {
+    const { data } = await this.client.get("/bank/resolve", {
       params: { account_number: accountNumber, bank_code: bankCode },
     });
-    if (!data.status) throw new Error(data.message || 'Account resolution failed');
+    if (!data.status)
+      throw new Error(data.message || "Account resolution failed");
     return data.data;
   }
 
   /**
    * List supported banks.
    */
-  async listBanks(): Promise<Array<{ name: string; code: string; type: string }>> {
-    const { data } = await this.client.get('/bank', {
-      params: { country: 'nigeria', perPage: 100 },
+  async listBanks(): Promise<
+    Array<{ name: string; code: string; type: string }>
+  > {
+    const { data } = await this.client.get("/bank", {
+      params: { country: "nigeria", perPage: 100 },
     });
-    if (!data.status) throw new Error(data.message || 'Failed to fetch banks');
+    if (!data.status) throw new Error(data.message || "Failed to fetch banks");
     return data.data;
   }
 
@@ -93,8 +104,9 @@ class PaystackService {
     bank_code: string;
     currency: string;
   }): Promise<{ recipient_code: string }> {
-    const { data } = await this.client.post('/transferrecipient', params);
-    if (!data.status) throw new Error(data.message || 'Failed to create transfer recipient');
+    const { data } = await this.client.post("/transferrecipient", params);
+    if (!data.status)
+      throw new Error(data.message || "Failed to create transfer recipient");
     return data.data;
   }
 
@@ -109,11 +121,12 @@ class PaystackService {
     reason?: string;
     source?: string;
   }): Promise<{ transfer_code: string; status: string }> {
-    const { data } = await this.client.post('/transfer', {
-      source: params.source || 'balance',
+    const { data } = await this.client.post("/transfer", {
+      source: params.source || "balance",
       ...params,
     });
-    if (!data.status) throw new Error(data.message || 'Transfer initiation failed');
+    if (!data.status)
+      throw new Error(data.message || "Transfer initiation failed");
     return data.data;
   }
 
@@ -128,21 +141,28 @@ class PaystackService {
     reference: string;
     metadata?: Record<string, unknown>;
   }): Promise<{ status: string; reference: string }> {
-    const { data } = await this.client.post('/transaction/charge_authorization', params);
-    if (!data.status) throw new Error(data.message || 'Charge authorization failed');
+    const { data } = await this.client.post(
+      "/transaction/charge_authorization",
+      params,
+    );
+    if (!data.status)
+      throw new Error(data.message || "Charge authorization failed");
     return data.data;
   }
 
   /**
    * Validate Paystack webhook signature using HMAC-SHA512.
    */
-  static validateWebhookSignature(rawBody: string | Buffer, signature: string): boolean {
+  static validateWebhookSignature(
+    rawBody: string | Buffer,
+    signature: string,
+  ): boolean {
     const secret = process.env.PAYSTACK_SECRET_KEY;
     if (!secret) return false;
     const hash = crypto
-      .createHmac('sha512', secret)
+      .createHmac("sha512", secret)
       .update(rawBody)
-      .digest('hex');
+      .digest("hex");
     return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(signature));
   }
 }
