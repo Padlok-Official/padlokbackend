@@ -76,40 +76,51 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
   const walletTx = await WalletTransactionModel.findByReference(reference);
 
   // Handle wallet funding via legacy wallet_transactions
-  if (walletTx && walletTx.status === 'pending' && walletTx.type === 'funding') {
+  if (walletTx && walletTx.type === 'funding') {
     const pool = db.getPool()!;
     const client = await pool.connect();
 
     try {
       await client.query('BEGIN');
 
-      const amountInNaira = (amount / 100).toFixed(4);
-      const balanceResult = await WalletModel.creditBalance(client, walletTx.wallet_id, amountInNaira);
-
-      await WalletTransactionModel.updateStatus(client, walletTx.id, 'completed');
-
-      // Update balance_after on the transaction record
-      await client.query(
-        `UPDATE wallet_transactions SET balance_after = $1 WHERE id = $2`,
-        [balanceResult.balance_after, walletTx.id]
+      // Re-check status inside transaction with a lock to avoid race with manual verification
+      const { rows } = await client.query(
+        `SELECT status FROM wallet_transactions WHERE id = $1 FOR UPDATE`,
+        [walletTx.id]
       );
 
-      await client.query('COMMIT');
+      if (rows[0]?.status === 'pending') {
+        const amountInNaira = (amount / 100).toFixed(4);
+        const balanceResult = await WalletModel.creditBalance(client, walletTx.wallet_id, amountInNaira);
 
-      // Save card authorization if reusable
-      if (authorization?.reusable && metadata?.wallet_id) {
-        await saveCardAuthorization(
-          metadata.wallet_id as string,
-          authorization
+        await WalletTransactionModel.updateStatus(client, walletTx.id, 'completed');
+
+        // Update balance_after on the transaction record
+        await client.query(
+          `UPDATE wallet_transactions SET balance_after = $1 WHERE id = $2`,
+          [balanceResult.balance_after, walletTx.id]
         );
-      }
 
-      await AuditLogModel.log({
-        action: 'wallet_funded',
-        entity_type: 'wallet',
-        entity_id: walletTx.wallet_id,
-        details: { amount: amountInNaira, reference, paystack_reference: reference },
-      });
+        await client.query('COMMIT');
+
+        // Save card authorization if reusable
+        if (authorization?.reusable && metadata?.wallet_id) {
+          await saveCardAuthorization(
+            metadata.wallet_id as string,
+            authorization
+          );
+        }
+
+        await AuditLogModel.log({
+          action: 'wallet_funded',
+          entity_type: 'wallet',
+          entity_id: walletTx.wallet_id,
+          details: { amount: amountInNaira, reference, paystack_reference: reference },
+        });
+      } else {
+        await client.query('ROLLBACK');
+        console.log(`Transaction ${reference} already processed (status: ${rows[0]?.status})`);
+      }
     } catch (err) {
       await client.query('ROLLBACK');
       console.error(`Failed to credit wallet for reference ${reference}:`, err);
@@ -122,7 +133,7 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
   // Handle deposit via unified transactions table
   const transaction = await TransactionModel.findByReference(reference);
 
-  if (transaction && transaction.status === 'pending' && transaction.type === 'deposit') {
+  if (transaction && transaction.type === 'deposit') {
     const walletId = (transaction.metadata as any)?.wallet_id;
     if (!walletId) {
       console.error(`No wallet_id in transaction metadata for reference ${reference}`);
@@ -135,23 +146,34 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
     try {
       await client.query('BEGIN');
 
-      const amountInNaira = (amount / 100).toFixed(4);
-      await WalletModel.creditBalance(client, walletId, amountInNaira);
-      await TransactionModel.updateStatus(client, transaction.id, 'completed');
+      // Re-check status inside transaction with a lock
+      const { rows } = await client.query(
+        `SELECT status FROM transactions WHERE id = $1 FOR UPDATE`,
+        [transaction.id]
+      );
 
-      await client.query('COMMIT');
+      if (rows[0]?.status === 'pending') {
+        const amountInNaira = (amount / 100).toFixed(4);
+        await WalletModel.creditBalance(client, walletId, amountInNaira);
+        await TransactionModel.updateStatus(client, transaction.id, 'completed');
 
-      // Save card authorization if reusable
-      if (authorization?.reusable) {
-        await saveCardAuthorization(walletId, authorization);
+        await client.query('COMMIT');
+
+        // Save card authorization if reusable
+        if (authorization?.reusable) {
+          await saveCardAuthorization(walletId, authorization);
+        }
+
+        await AuditLogModel.log({
+          action: 'deposit_completed',
+          entity_type: 'transaction',
+          entity_id: transaction.id,
+          details: { amount: amountInNaira, reference },
+        });
+      } else {
+        await client.query('ROLLBACK');
+        console.log(`Unified transaction ${reference} already processed (status: ${rows[0]?.status})`);
       }
-
-      await AuditLogModel.log({
-        action: 'deposit_completed',
-        entity_type: 'transaction',
-        entity_id: transaction.id,
-        details: { amount: amountInNaira, reference },
-      });
     } catch (err) {
       await client.query('ROLLBACK');
       console.error(`Failed to credit wallet for deposit ${reference}:`, err);

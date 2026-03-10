@@ -21,12 +21,12 @@ export const changePinValidator = [
 
 export const fundWalletValidator = [
   body('amount')
-    .isDecimal({ decimal_digits: '0,2' })
+    .isNumeric()
     .withMessage('Amount must be a valid number')
-    .custom((val) => parseFloat(val) >= 100)
-    .withMessage('Minimum funding amount is NGN 100')
+    .custom((val) => parseFloat(val) >= 1)
+    .withMessage('Minimum funding amount is 1.00')
     .custom((val) => parseFloat(val) <= 10000000)
-    .withMessage('Maximum funding amount is NGN 10,000,000'),
+    .withMessage('Maximum funding amount is 10,000,000'),
   body('callback_url')
     .optional()
     .isString()
