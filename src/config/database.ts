@@ -6,13 +6,14 @@ dotenv.config();
 class Database {
   private pool: Pool | null = null;
 
-  async connect(): Promise<void> {
+  private ensurePool(): Pool {
+    if (this.pool) return this.pool;
+
     const connectionString = process.env.DATABASE_URL;
 
-    let config: PoolConfig | string;
+    let config: PoolConfig;
 
     if (connectionString) {
-      console.log('📦 Using connection URL');
       const isSupabase = connectionString.includes('supabase.co');
       const isRailway =
         connectionString.includes('railway.app') ||
@@ -28,7 +29,6 @@ class Database {
         }),
       };
     } else if (process.env.DB_HOST) {
-      console.log('📦 Using individual parameters (host, user, database)');
       const useSsl = process.env.DB_SSL !== 'false';
       config = {
         host: process.env.DB_HOST || 'localhost',
@@ -46,13 +46,10 @@ class Database {
         }),
       };
     } else {
-      console.error('No database configuration found!');
-      console.error(
-        '💡 Please set either DATABASE_URL or DB_HOST, DB_NAME, DB_USER, DB_PASSWORD'
+      throw new Error(
+        'Database configuration missing. Set either DATABASE_URL or DB_HOST, DB_NAME, DB_USER, DB_PASSWORD'
       );
-      throw new Error('Database configuration missing');
     }
-
 
     this.pool = new Pool(config);
 
@@ -60,8 +57,14 @@ class Database {
       console.error('Unexpected database pool error:', err);
     });
 
+    return this.pool;
+  }
+
+  async connect(): Promise<void> {
+    const pool = this.ensurePool();
+
     try {
-      await this.pool.query('SELECT NOW()');
+      await pool.query('SELECT NOW()');
       console.log('Database pool created successfully');
     } catch (err: unknown) {
       const error = err as NodeJS.ErrnoException;
@@ -85,10 +88,7 @@ class Database {
     text: string,
     params?: (string | number | boolean | null | Date)[]
   ): Promise<QueryResult<T>> {
-    if (!this.pool) {
-      throw new Error('Database pool not initialized. Call connect() first.');
-    }
-    return this.pool.query<T>(text, params);
+    return this.ensurePool().query<T>(text, params);
   }
 
   async disconnect(): Promise<void> {
@@ -99,8 +99,8 @@ class Database {
     }
   }
 
-  getPool(): Pool | null {
-    return this.pool;
+  getPool(): Pool {
+    return this.ensurePool();
   }
 }
 
