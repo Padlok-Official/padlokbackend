@@ -1,6 +1,7 @@
 import "dotenv/config";
 import app from "./app";
 import db from "./config/database";
+import { setupPaystackWorker } from "./workers/paystackWorker";
 
 const PORT = Number(process.env.PORT) || 6000;
 
@@ -29,9 +30,12 @@ async function startServer(): Promise<void> {
       );
     });
 
+    const worker = setupPaystackWorker();
+
     const shutdown = (signal: string) => {
       console.log(`${signal} received, shutting down gracefully...`);
       server.close(async () => {
+        await worker.close();
         await db.disconnect();
         process.exit(0);
       });
