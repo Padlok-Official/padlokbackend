@@ -19,6 +19,9 @@ import webhookRoutes from "./routes/webhookRoutes";
 
 const app = express();
 
+// Trust proxy for deployments behind reverse proxies (Vercel, Railway, etc.)
+app.set("trust proxy", 1);
+
 // Webhook routes MUST be registered BEFORE express.json() middleware
 // because Paystack webhook needs the raw body for HMAC signature verification
 app.use("/api/v1/webhooks", webhookRoutes);
