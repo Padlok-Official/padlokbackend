@@ -14,6 +14,7 @@ import adminRoutes from "./routes/adminRoutes";
 import walletRoutes from "./routes/walletRoute";
 import escrowRoutes from "./routes/escrowRoutes";
 import paymentMethodRoutes from "./routes/paymentMethodRoutes";
+import transactionRoutes from "./routes/transactionRoutes";
 import webhookRoutes from "./routes/webhookRoutes";
 
 const app = express();
@@ -40,6 +41,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/user", userRoutes);
 app.use("/api/v1/wallet", walletRoutes);
 app.use("/api/v1/escrow", escrowRoutes);
+app.use("/api/v1/transactions", transactionRoutes);
 app.use("/api/v1/payment-methods", paymentMethodRoutes);
 app.use("/api/v1/otp", otpRoutes);
 app.use("/api/v1/admin", adminRoutes);

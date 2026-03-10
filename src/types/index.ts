@@ -155,6 +155,38 @@ export interface AuditLogEntry {
   created_at: Date;
 }
 
+// Unified transaction (deposit, withdrawal, escrow)
+export type TransactionType = 'deposit' | 'withdrawal' | 'escrow';
+
+export type DepositStatus = 'pending' | 'completed' | 'failed';
+export type WithdrawalStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type EscrowStatus = 'initiated' | 'funded' | 'delivery_confirmed' | 'completed' | 'disputed' | 'refunded' | 'cancelled';
+
+export type TransactionStatus = DepositStatus | WithdrawalStatus | EscrowStatus;
+
+export interface Transaction {
+  id: string;
+  type: TransactionType;
+  status: TransactionStatus;
+  reference: string;
+  amount: string;
+  fee: string;
+  currency: string;
+  user_id: string;
+  paystack_reference?: string;
+  payment_method_id?: string;
+  receiver_id?: string;
+  item_photos?: string[];
+  item_description?: string;
+  delivery_window?: string; // PostgreSQL interval as string
+  delivery_deadline?: Date;
+  delivery_confirmed_at?: Date;
+  receiver_confirmed_at?: Date;
+  metadata?: Record<string, unknown>;
+  created_at: Date;
+  updated_at: Date;
+}
+
 // Paystack webhook event payload
 export interface PaystackWebhookEvent {
   event: string;

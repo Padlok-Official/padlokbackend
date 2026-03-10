@@ -220,6 +220,131 @@ export const fundWallet = async (
 };
 
 /**
+ * GET /api/v1/wallet/fund/verify/:reference
+ * Verify a wallet funding transaction.
+ * Checks Paystack status and credits wallet if not already credited by webhook.
+ */
+export const verifyFunding = async (
+  req: WalletRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void | Response> => {
+  try {
+    const { reference } = req.params;
+    const wallet = req.wallet!;
+
+    // Find the wallet transaction by reference
+    const walletTx = await WalletTransactionModel.findByReference(reference);
+
+    if (!walletTx || walletTx.wallet_id !== wallet.id) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Transaction not found" });
+    }
+
+    // If already completed (e.g. by webhook), return success immediately
+    if (walletTx.status === "completed") {
+      return res.status(200).json({
+        success: true,
+        message: "Transaction already completed",
+        data: {
+          status: "completed",
+          amount: walletTx.amount,
+          reference: walletTx.reference,
+        },
+      });
+    }
+
+    if (walletTx.status === "failed") {
+      return res.status(200).json({
+        success: true,
+        data: {
+          status: "failed",
+          reference: walletTx.reference,
+        },
+      });
+    }
+
+    // Transaction still pending — verify with Paystack
+    const paystackRef = walletTx.paystack_reference || reference;
+    let verified;
+    try {
+      verified = await paystackService.verifyTransaction(paystackRef);
+    } catch {
+      // Paystack verification failed, transaction is still pending
+      return res.status(200).json({
+        success: true,
+        data: {
+          status: "pending",
+          reference: walletTx.reference,
+        },
+      });
+    }
+
+    if (verified.status === "success") {
+      // Credit wallet (idempotent — only if still pending)
+      const pool = db.getPool()!;
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+
+        // Re-check status inside transaction to avoid race with webhook
+        const { rows } = await client.query(
+          `SELECT status FROM wallet_transactions WHERE id = $1 FOR UPDATE`,
+          [walletTx.id],
+        );
+
+        if (rows[0]?.status === "pending") {
+          const amountInNaira = (verified.amount / 100).toFixed(4);
+          const balanceResult = await WalletModel.creditBalance(
+            client,
+            wallet.id,
+            amountInNaira,
+          );
+          await WalletTransactionModel.updateStatus(
+            client,
+            walletTx.id,
+            "completed",
+          );
+          await client.query(
+            `UPDATE wallet_transactions SET balance_after = $1 WHERE id = $2`,
+            [balanceResult.balance_after, walletTx.id],
+          );
+        }
+
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Transaction verified and completed",
+        data: {
+          status: "completed",
+          amount: (verified.amount / 100).toFixed(2),
+          reference: walletTx.reference,
+        },
+      });
+    }
+
+    // Payment not yet successful on Paystack side
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: verified.status === "abandoned" ? "cancelled" : "pending",
+        reference: walletTx.reference,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * POST /api/v1/wallet/withdraw
  * Withdraw from wallet to bank account.
  */

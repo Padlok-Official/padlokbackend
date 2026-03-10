@@ -44,6 +44,13 @@ router.post(
   walletController.fundWallet,
 );
 
+// GET /api/v1/wallet/fund/verify/:reference - Verify funding transaction
+router.get(
+  "/fund/verify/:reference",
+  requireWallet,
+  walletController.verifyFunding,
+);
+
 // POST /api/v1/wallet/withdraw - Withdraw to bank account
 router.post(
   "/withdraw",

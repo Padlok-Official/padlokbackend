@@ -37,6 +37,7 @@
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
+    "paystack-sdk": "^3.6.1",
     "pg": "^8.18.0",
     "uuid": "^10.0.0"
   },

@@ -1,20 +1,10 @@
-import axios, { AxiosInstance } from "axios";
+import Paystack from "paystack-sdk";
 import crypto from "crypto";
 
+const secretKey = process.env.PAYSTACK_SECRET_KEY!;
+const paystack = new Paystack(secretKey);
+
 class PaystackService {
-  private client: AxiosInstance;
-
-  constructor() {
-    this.client = axios.create({
-      baseURL: "https://api.paystack.co",
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
-    });
-  }
-
   /**
    * Initialize a transaction for wallet funding or escrow payment.
    * Amount is in kobo (NGN * 100).
@@ -30,10 +20,20 @@ class PaystackService {
     access_code: string;
     reference: string;
   }> {
-    const { data } = await this.client.post("/transaction/initialize", params);
-    if (!data.status)
-      throw new Error(data.message || "Paystack initialization failed");
-    return data.data;
+    const result = await paystack.transaction.initialize({
+      email: params.email,
+      amount: String(params.amount),
+      reference: params.reference,
+      callback_url: params.callback_url,
+      metadata: params.metadata,
+    });
+
+    if (!result.status) {
+      throw new Error(
+        (result as any).message || "Paystack initialization failed",
+      );
+    }
+    return (result as any).data;
   }
 
   /**
@@ -58,12 +58,14 @@ class PaystackService {
     customer: { email: string };
     metadata?: Record<string, unknown>;
   }> {
-    const { data } = await this.client.get(
-      `/transaction/verify/${encodeURIComponent(reference)}`,
-    );
-    if (!data.status)
-      throw new Error(data.message || "Paystack verification failed");
-    return data.data;
+    const result = await paystack.transaction.verify(reference);
+
+    if (!result.status) {
+      throw new Error(
+        (result as any).message || "Paystack verification failed",
+      );
+    }
+    return (result as any).data;
   }
 
   /**
@@ -73,12 +75,17 @@ class PaystackService {
     accountNumber: string,
     bankCode: string,
   ): Promise<{ account_name: string; account_number: string }> {
-    const { data } = await this.client.get("/bank/resolve", {
-      params: { account_number: accountNumber, bank_code: bankCode },
+    const result = await paystack.verification.resolveAccount({
+      account_number: accountNumber,
+      bank_code: bankCode,
     });
-    if (!data.status)
-      throw new Error(data.message || "Account resolution failed");
-    return data.data;
+
+    if (!result.status) {
+      throw new Error(
+        (result as any).message || "Account resolution failed",
+      );
+    }
+    return (result as any).data;
   }
 
   /**
@@ -87,11 +94,12 @@ class PaystackService {
   async listBanks(): Promise<
     Array<{ name: string; code: string; type: string }>
   > {
-    const { data } = await this.client.get("/bank", {
-      params: { country: "nigeria", perPage: 100 },
-    });
-    if (!data.status) throw new Error(data.message || "Failed to fetch banks");
-    return data.data;
+    const result = await paystack.misc.banks();
+
+    if (!result.status) {
+      throw new Error((result as any).message || "Failed to fetch banks");
+    }
+    return (result as any).data;
   }
 
   /**
@@ -104,10 +112,20 @@ class PaystackService {
     bank_code: string;
     currency: string;
   }): Promise<{ recipient_code: string }> {
-    const { data } = await this.client.post("/transferrecipient", params);
-    if (!data.status)
-      throw new Error(data.message || "Failed to create transfer recipient");
-    return data.data;
+    const result = await paystack.recipient.create({
+      type: params.type,
+      name: params.name,
+      account_number: params.account_number,
+      bank_code: params.bank_code,
+      currency: params.currency,
+    });
+
+    if (!result.status) {
+      throw new Error(
+        (result as any).message || "Failed to create transfer recipient",
+      );
+    }
+    return (result as any).data;
   }
 
   /**
@@ -121,13 +139,20 @@ class PaystackService {
     reason?: string;
     source?: string;
   }): Promise<{ transfer_code: string; status: string }> {
-    const { data } = await this.client.post("/transfer", {
+    const result = await paystack.transfer.initiate({
       source: params.source || "balance",
-      ...params,
+      amount: params.amount,
+      recipient: params.recipient,
+      reference: params.reference,
+      reason: params.reason,
     });
-    if (!data.status)
-      throw new Error(data.message || "Transfer initiation failed");
-    return data.data;
+
+    if (!result.status) {
+      throw new Error(
+        (result as any).message || "Transfer initiation failed",
+      );
+    }
+    return (result as any).data;
   }
 
   /**
@@ -141,13 +166,20 @@ class PaystackService {
     reference: string;
     metadata?: Record<string, unknown>;
   }): Promise<{ status: string; reference: string }> {
-    const { data } = await this.client.post(
-      "/transaction/charge_authorization",
-      params,
-    );
-    if (!data.status)
-      throw new Error(data.message || "Charge authorization failed");
-    return data.data;
+    const result = await paystack.transaction.chargeAuthorization({
+      authorization_code: params.authorization_code,
+      email: params.email,
+      amount: String(params.amount),
+      reference: params.reference,
+      metadata: params.metadata,
+    });
+
+    if (!result.status) {
+      throw new Error(
+        (result as any).message || "Charge authorization failed",
+      );
+    }
+    return (result as any).data;
   }
 
   /**
@@ -157,10 +189,9 @@ class PaystackService {
     rawBody: string | Buffer,
     signature: string,
   ): boolean {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
-    if (!secret) return false;
+    if (!secretKey) return false;
     const hash = crypto
-      .createHmac("sha512", secret)
+      .createHmac("sha512", secretKey)
       .update(rawBody)
       .digest("hex");
     return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(signature));

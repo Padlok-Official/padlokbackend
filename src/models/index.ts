@@ -7,3 +7,4 @@ export { PaymentMethodModel } from './PaymentMethod';
 export { DisputeModel } from './Dispute';
 export { IdempotencyKeyModel } from './IdempotencyKey';
 export { AuditLogModel } from './AuditLog';
+export { TransactionModel } from './Transaction';

@@ -23,7 +23,7 @@ async function startServer(): Promise<void> {
   try {
     await db.connect();
 
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(
         `Server running on port ${PORT} (${process.env.NODE_ENV ?? "development"})`,
       );

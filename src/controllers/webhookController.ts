@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import db from '../config/database';
-import { WalletModel, WalletTransactionModel, EscrowTransactionModel, PaymentMethodModel, AuditLogModel } from '../models';
+import { WalletModel, WalletTransactionModel, EscrowTransactionModel, PaymentMethodModel, AuditLogModel, TransactionModel } from '../models';
 import { paystackService, PaystackService } from '../services/paystackService';
 import { PaystackWebhookEvent } from '../types';
 
@@ -72,10 +72,10 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
 
   if (verified.status !== 'success') return;
 
-  // Find the pending wallet transaction
+  // Find the pending wallet transaction (legacy wallet_transactions table)
   const walletTx = await WalletTransactionModel.findByReference(reference);
 
-  // Handle wallet funding
+  // Handle wallet funding via legacy wallet_transactions
   if (walletTx && walletTx.status === 'pending' && walletTx.type === 'funding') {
     const pool = db.getPool()!;
     const client = await pool.connect();
@@ -116,6 +116,48 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
     } finally {
       client.release();
     }
+    return;
+  }
+
+  // Handle deposit via unified transactions table
+  const transaction = await TransactionModel.findByReference(reference);
+
+  if (transaction && transaction.status === 'pending' && transaction.type === 'deposit') {
+    const walletId = (transaction.metadata as any)?.wallet_id;
+    if (!walletId) {
+      console.error(`No wallet_id in transaction metadata for reference ${reference}`);
+      return;
+    }
+
+    const pool = db.getPool()!;
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const amountInNaira = (amount / 100).toFixed(4);
+      await WalletModel.creditBalance(client, walletId, amountInNaira);
+      await TransactionModel.updateStatus(client, transaction.id, 'completed');
+
+      await client.query('COMMIT');
+
+      // Save card authorization if reusable
+      if (authorization?.reusable) {
+        await saveCardAuthorization(walletId, authorization);
+      }
+
+      await AuditLogModel.log({
+        action: 'deposit_completed',
+        entity_type: 'transaction',
+        entity_id: transaction.id,
+        details: { amount: amountInNaira, reference },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error(`Failed to credit wallet for deposit ${reference}:`, err);
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -125,27 +167,53 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
 async function handleTransferSuccess(event: PaystackWebhookEvent): Promise<void> {
   const { reference } = event.data;
 
+  // Check legacy wallet_transactions first
   const walletTx = await WalletTransactionModel.findByReference(reference);
-  if (!walletTx || walletTx.status !== 'pending') return;
+  if (walletTx && walletTx.status === 'pending') {
+    const pool = db.getPool()!;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await WalletTransactionModel.updateStatus(client, walletTx.id, 'completed');
+      await client.query('COMMIT');
 
-  const pool = db.getPool()!;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await WalletTransactionModel.updateStatus(client, walletTx.id, 'completed');
-    await client.query('COMMIT');
+      await AuditLogModel.log({
+        action: 'withdrawal_completed',
+        entity_type: 'wallet',
+        entity_id: walletTx.wallet_id,
+        details: { amount: walletTx.amount, reference },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error(`Failed to update transfer status for ${reference}:`, err);
+    } finally {
+      client.release();
+    }
+    return;
+  }
 
-    await AuditLogModel.log({
-      action: 'withdrawal_completed',
-      entity_type: 'wallet',
-      entity_id: walletTx.wallet_id,
-      details: { amount: walletTx.amount, reference },
-    });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(`Failed to update transfer status for ${reference}:`, err);
-  } finally {
-    client.release();
+  // Check unified transactions table
+  const transaction = await TransactionModel.findByReference(reference);
+  if (transaction && transaction.status === 'pending' && transaction.type === 'withdrawal') {
+    const pool = db.getPool()!;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await TransactionModel.updateStatus(client, transaction.id, 'completed');
+      await client.query('COMMIT');
+
+      await AuditLogModel.log({
+        action: 'withdrawal_completed',
+        entity_type: 'transaction',
+        entity_id: transaction.id,
+        details: { amount: transaction.amount, reference },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error(`Failed to update transfer status for ${reference}:`, err);
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -155,31 +223,61 @@ async function handleTransferSuccess(event: PaystackWebhookEvent): Promise<void>
 async function handleTransferFailed(event: PaystackWebhookEvent): Promise<void> {
   const { reference } = event.data;
 
+  // Check legacy wallet_transactions first
   const walletTx = await WalletTransactionModel.findByReference(reference);
-  if (!walletTx || walletTx.status !== 'pending') return;
+  if (walletTx && walletTx.status === 'pending') {
+    const pool = db.getPool()!;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await WalletModel.creditBalance(client, walletTx.wallet_id, walletTx.amount);
+      await WalletTransactionModel.updateStatus(client, walletTx.id, 'failed');
+      await client.query('COMMIT');
 
-  const pool = db.getPool()!;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+      await AuditLogModel.log({
+        action: 'withdrawal_failed_reversed',
+        entity_type: 'wallet',
+        entity_id: walletTx.wallet_id,
+        details: { amount: walletTx.amount, reference },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error(`Failed to reverse withdrawal for ${reference}:`, err);
+    } finally {
+      client.release();
+    }
+    return;
+  }
 
-    // Reverse the debit
-    await WalletModel.creditBalance(client, walletTx.wallet_id, walletTx.amount);
-    await WalletTransactionModel.updateStatus(client, walletTx.id, 'failed');
+  // Check unified transactions table
+  const transaction = await TransactionModel.findByReference(reference);
+  if (transaction && transaction.status === 'pending' && transaction.type === 'withdrawal') {
+    const walletId = (transaction.metadata as any)?.wallet_id;
+    if (!walletId) {
+      console.error(`No wallet_id in transaction metadata for reference ${reference}`);
+      return;
+    }
 
-    await client.query('COMMIT');
+    const pool = db.getPool()!;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await WalletModel.creditBalance(client, walletId, transaction.amount);
+      await TransactionModel.updateStatus(client, transaction.id, 'failed');
+      await client.query('COMMIT');
 
-    await AuditLogModel.log({
-      action: 'withdrawal_failed_reversed',
-      entity_type: 'wallet',
-      entity_id: walletTx.wallet_id,
-      details: { amount: walletTx.amount, reference },
-    });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(`Failed to reverse withdrawal for ${reference}:`, err);
-  } finally {
-    client.release();
+      await AuditLogModel.log({
+        action: 'withdrawal_failed_reversed',
+        entity_type: 'transaction',
+        entity_id: transaction.id,
+        details: { amount: transaction.amount, reference },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error(`Failed to reverse withdrawal for ${reference}:`, err);
+    } finally {
+      client.release();
+    }
   }
 }
 
