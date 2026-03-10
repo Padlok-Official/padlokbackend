@@ -29,7 +29,7 @@ export const fundWalletValidator = [
     .withMessage('Maximum funding amount is NGN 10,000,000'),
   body('callback_url')
     .optional()
-    .isURL()
+    .isString()
     .withMessage('Invalid callback URL'),
 ];
 
