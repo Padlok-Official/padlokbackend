@@ -1,6 +1,4 @@
 import "dotenv/config";
-import fs from "fs";
-import https from "https";
 import app from "./app";
 import db from "./config/database";
 
@@ -25,27 +23,11 @@ async function startServer(): Promise<void> {
   try {
     await db.connect();
 
-    let server;
-    if (
-      process.env.NODE_ENV !== "production" &&
-      fs.existsSync("./certs/key.pem")
-    ) {
-      const options = {
-        key: fs.readFileSync("./certs/key.pem"),
-        cert: fs.readFileSync("./certs/cert.pem"),
-      };
-      server = https.createServer(options, app).listen(PORT, () => {
-        console.log(
-          `HTTPS server running on https://localhost:${PORT} (${process.env.NODE_ENV ?? "development"})`,
-        );
-      });
-    } else {
-      server = app.listen(PORT, () => {
-        console.log(
-          `Server running on port ${PORT} (${process.env.NODE_ENV ?? "development"})`,
-        );
-      });
-    }
+    const server = app.listen(PORT, () => {
+      console.log(
+        `Server running on port ${PORT} (${process.env.NODE_ENV ?? "development"})`,
+      );
+    });
 
     const shutdown = (signal: string) => {
       console.log(`${signal} received, shutting down gracefully...`);
