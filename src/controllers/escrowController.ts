@@ -53,8 +53,13 @@ export const initiateEscrow = async (
       });
     }
 
+    // Calculate fees (3% platform fee)
+    const platformFeeRate = 0.03;
+    const fee = Math.round(price * platformFeeRate * 100) / 100; // Round to 2 decimal places
+    const totalAmount = price + fee;
+
     // Check spending limits
-    const limitCheck = await WalletModel.checkSpendingLimits(buyerWallet.id, price);
+    const limitCheck = await WalletModel.checkSpendingLimits(buyerWallet.id, totalAmount.toString());
     if (!limitCheck.allowed) {
       return res.status(400).json({ success: false, message: limitCheck.reason });
     }
@@ -68,8 +73,8 @@ export const initiateEscrow = async (
       // Reset spending if needed
       await WalletModel.resetSpendingIfNeeded(client, buyerWallet.id);
 
-      // Debit buyer's wallet (lock funds in escrow)
-      const balanceResult = await WalletModel.debitBalance(client, buyerWallet.id, price);
+      // Debit buyer's wallet (lock total funds in escrow: price + fee)
+      const balanceResult = await WalletModel.debitBalance(client, buyerWallet.id, totalAmount.toString());
 
       // Create escrow transaction
       const escrowTx = await EscrowTransactionModel.create(client, {
@@ -80,7 +85,8 @@ export const initiateEscrow = async (
         seller_wallet_id: sellerWallet.id,
         item_description,
         item_photos,
-        price,
+        price: price.toString(),
+        fee: fee.toString(),
       });
 
       // Update escrow status to funded
@@ -90,13 +96,13 @@ export const initiateEscrow = async (
       await WalletTransactionModel.create(client, {
         wallet_id: buyerWallet.id,
         type: 'escrow_lock',
-        amount: price,
+        amount: totalAmount.toString(),
         balance_before: balanceResult.balance_before,
         balance_after: balanceResult.balance_after,
         status: 'completed',
         reference: `${reference}_lock`,
         escrow_transaction_id: escrowTx.id,
-        description: `Escrow payment for: ${item_description.substring(0, 100)}`,
+        description: `Escrow payment for: ${item_description.substring(0, 100)} (Includes GH₵${fee} fee)`,
       });
 
       await client.query('COMMIT');
@@ -106,7 +112,7 @@ export const initiateEscrow = async (
         action: 'escrow_initiated',
         entity_type: 'escrow_transaction',
         entity_id: escrowTx.id,
-        details: { price, seller_id: seller.id, reference },
+        details: { price, fee, totalAmount, seller_id: seller.id, reference },
         ip_address: req.ip,
         user_agent: req.headers['user-agent'],
       });
@@ -119,6 +125,8 @@ export const initiateEscrow = async (
           reference: escrowTx.reference,
           status: 'funded',
           price,
+          fee,
+          totalAmount,
           seller_email,
           item_description,
           item_photos,

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import db from '../config/database';
 import { WalletModel, WalletTransactionModel, EscrowTransactionModel, PaymentMethodModel, AuditLogModel } from '../models';
 import { paystackService, PaystackService } from '../services/paystackService';
+import { paystackQueue } from '../config/queue';
 import { PaystackWebhookEvent } from '../types';
 
 /**
@@ -30,12 +31,19 @@ export const paystackWebhook = async (
   // Respond immediately to prevent Paystack retries
   res.status(200).json({ success: true });
 
-  // Process the event asynchronously
+  // Process the event asynchronously via BullMQ
   try {
-    const event: PaystackWebhookEvent = JSON.parse(rawBody.toString());
-    await processWebhookEvent(event);
+    const rawData = rawBody.toString();
+    const event: PaystackWebhookEvent = JSON.parse(rawData);
+    
+    // Add job to the queue
+    await paystackQueue.add(event.event, event, {
+      jobId: `paystack_wh_${event.event}_${event.data.reference || Date.now()}`,
+    });
+    
+    console.log(`Webhook event ${event.event} added to background queue`);
   } catch (err) {
-    console.error('Webhook processing error:', err);
+    console.error('Failed to queue webhook event:', err);
   }
 };
 
