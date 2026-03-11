@@ -141,4 +141,18 @@ export const UserModel = {
     );
     return parseInt(rows[0].count, 10);
   },
+
+  async search(query: string): Promise<User[]> {
+    const searchTerm = `%${query.trim().toLowerCase()}%`;
+    const { rows } = await db.query<User>(
+      `SELECT id, name, email, phone_number, email_verified, phone_verified, is_active, created_at
+       FROM users 
+       WHERE (phone_number LIKE $1) 
+       AND is_active = TRUE
+       ORDER BY phone_verified DESC
+       LIMIT 10`,
+      [searchTerm]
+    );
+    return rows;
+  },
 };

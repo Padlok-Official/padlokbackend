@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   changePassword,
   getProfile,
+  searchUsers,
   updateFcmToken,
   updateProfile,
 } from '../controllers/userController';
@@ -18,6 +19,7 @@ router.use(authenticate);
 
 router.get('/me', getProfile);
 router.get('/profile', getProfile);
+router.get('/search', searchUsers);
 
 router.patch(
   '/me',

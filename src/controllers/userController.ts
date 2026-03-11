@@ -154,3 +154,29 @@ export const updateFcmToken = async (
     next(err);
   }
 };
+
+export const searchUsers = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> => {
+  try {
+    const { q } = req.query;
+
+    if (typeof q !== 'string' || !q.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Search query is required',
+      });
+    }
+
+    const users = await UserModel.search(q);
+
+    res.json({
+      success: true,
+      data: users,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
