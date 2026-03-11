@@ -70,25 +70,23 @@ export interface WalletWithPin extends Wallet {
   monthly_spent_reset_at: string;
 }
 
-// Escrow transaction between buyer and seller
+// Escrow transaction between buyer and seller (Specific view of Transaction)
 export interface EscrowTransaction {
   id: string;
   reference: string;
-  buyer_id: string;
-  seller_id: string;
-  buyer_wallet_id: string;
-  seller_wallet_id: string;
-  item_description: string;
-  item_photos: string[];
-  price: string;
+  user_id: string; // buyer
+  receiver_id: string; // seller
+  amount: string; // price
   fee: string;
   currency: string;
-  status: 'initiated' | 'funded' | 'delivery_confirmed' | 'completed' | 'disputed' | 'refunded' | 'cancelled';
+  status: EscrowStatus;
   paystack_reference?: string;
   paystack_transfer_code?: string;
   delivery_confirmed_at?: Date;
   delivery_deadline?: Date;
-  buyer_confirmed_at?: Date;
+  receiver_confirmed_at?: Date; // formerly buyer_confirmed_at in EscrowTransaction, but Transaction uses receiver_confirmed_at
+  item_description: string;
+  item_photos: string[];
   metadata?: Record<string, unknown>;
   created_at: Date;
   updated_at: Date;

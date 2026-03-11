@@ -155,7 +155,7 @@ export const confirmDelivery = async (
       return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
     }
 
-    if (escrowTx.seller_id !== req.user!.id) {
+    if (escrowTx.receiver_id !== req.user!.id) {
       return res.status(403).json({ success: false, message: 'Only the seller can confirm delivery' });
     }
 
@@ -223,7 +223,7 @@ export const confirmReceipt = async (
       return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
     }
 
-    if (escrowTx.buyer_id !== req.user!.id) {
+    if (escrowTx.user_id !== req.user!.id) {
       return res.status(403).json({ success: false, message: 'Only the buyer can confirm receipt' });
     }
 
@@ -242,10 +242,15 @@ export const confirmReceipt = async (
       await client.query('BEGIN');
 
       // Credit seller's wallet
+      const sellerWalletId = (escrowTx.metadata as any)?.receiver_wallet_id;
+      if (!sellerWalletId) {
+        throw new Error('Seller wallet ID not found in metadata');
+      }
+
       const balanceResult = await WalletModel.creditBalance(
         client,
-        escrowTx.seller_wallet_id,
-        escrowTx.price
+        sellerWalletId,
+        escrowTx.amount
       );
 
       // Update escrow status
@@ -255,9 +260,9 @@ export const confirmReceipt = async (
 
       // Record wallet transaction (escrow release to seller)
       await WalletTransactionModel.create(client, {
-        wallet_id: escrowTx.seller_wallet_id,
+        wallet_id: sellerWalletId,
         type: 'escrow_release',
-        amount: escrowTx.price,
+        amount: escrowTx.amount,
         balance_before: balanceResult.balance_before,
         balance_after: balanceResult.balance_after,
         status: 'completed',
@@ -279,7 +284,7 @@ export const confirmReceipt = async (
       action: 'receipt_confirmed',
       entity_type: 'escrow_transaction',
       entity_id: escrowTx.id,
-      details: { price: escrowTx.price, seller_id: escrowTx.seller_id },
+      details: { price: escrowTx.amount, seller_id: escrowTx.receiver_id },
       ip_address: req.ip,
       user_agent: req.headers['user-agent'],
     });
@@ -310,7 +315,7 @@ export const raiseDispute = async (
       return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
     }
 
-    if (escrowTx.buyer_id !== req.user!.id) {
+    if (escrowTx.user_id !== req.user!.id) {
       return res.status(403).json({ success: false, message: 'Only the buyer can raise a dispute' });
     }
 
@@ -393,7 +398,7 @@ export const cancelEscrow = async (
       return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
     }
 
-    if (escrowTx.buyer_id !== req.user!.id) {
+    if (escrowTx.user_id !== req.user!.id) {
       return res.status(403).json({ success: false, message: 'Only the buyer can cancel' });
     }
 
@@ -481,7 +486,7 @@ export const getEscrowById = async (
     }
 
     // Only buyer or seller can view
-    if (escrowTx.buyer_id !== req.user!.id && escrowTx.seller_id !== req.user!.id) {
+    if (escrowTx.user_id !== req.user!.id && escrowTx.receiver_id !== req.user!.id) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
@@ -537,16 +542,21 @@ export const resolveDispute = async (
 
       if (resolution === 'refund') {
         // Refund buyer
+        const buyerWalletId = (escrowTx.metadata as any)?.sender_wallet_id;
+        if (!buyerWalletId) {
+          throw new Error('Buyer wallet ID not found in metadata');
+        }
+
         const balanceResult = await WalletModel.creditBalance(
           client,
-          escrowTx.buyer_wallet_id,
-          escrowTx.price
+          buyerWalletId,
+          escrowTx.amount
         );
 
         await WalletTransactionModel.create(client, {
-          wallet_id: escrowTx.buyer_wallet_id,
+          wallet_id: buyerWalletId,
           type: 'escrow_refund',
-          amount: escrowTx.price,
+          amount: escrowTx.amount,
           balance_before: balanceResult.balance_before,
           balance_after: balanceResult.balance_after,
           status: 'completed',
@@ -559,16 +569,21 @@ export const resolveDispute = async (
         await DisputeModel.updateStatus(client, dispute.id, 'resolved_refund', req.user!.id, admin_notes);
       } else {
         // Release to seller
+        const sellerWalletId = (escrowTx.metadata as any)?.receiver_wallet_id;
+        if (!sellerWalletId) {
+          throw new Error('Seller wallet ID not found in metadata');
+        }
+
         const balanceResult = await WalletModel.creditBalance(
           client,
-          escrowTx.seller_wallet_id,
-          escrowTx.price
+          sellerWalletId,
+          escrowTx.amount
         );
 
         await WalletTransactionModel.create(client, {
-          wallet_id: escrowTx.seller_wallet_id,
+          wallet_id: sellerWalletId,
           type: 'escrow_release',
-          amount: escrowTx.price,
+          amount: escrowTx.amount,
           balance_before: balanceResult.balance_before,
           balance_after: balanceResult.balance_after,
           status: 'completed',
@@ -592,7 +607,7 @@ export const resolveDispute = async (
           escrow_id: escrowTx.id,
           resolution,
           admin_notes,
-          amount: escrowTx.price,
+          amount: escrowTx.amount,
         },
         ip_address: req.ip,
         user_agent: req.headers['user-agent'],

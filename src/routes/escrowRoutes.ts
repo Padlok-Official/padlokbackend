@@ -21,8 +21,8 @@ router.post(
   requireWallet,
   // requirePin,
   // requireIdempotencyKey,
-  validators.initiateEscrowValidator,
-  handleValidationErrors,
+  // validators.initiateEscrowValidator,
+  // handleValidationErrors,
   escrowController.initiateEscrow
 );
 

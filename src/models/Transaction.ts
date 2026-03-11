@@ -128,12 +128,21 @@ export const TransactionModel = {
       offset?: number;
       from?: Date;
       to?: Date;
+      activeToday?: boolean;
     } = {}
   ): Promise<{ transactions: Transaction[]; total: number }> {
-    const { type, status, limit = 20, offset = 0, from, to } = options;
+    const { type, status, limit = 20, offset = 0, from, to, activeToday } = options;
     const conditions: string[] = ['(user_id = $1 OR receiver_id = $1)'];
     const values: (string | number | boolean | Date | null)[] = [userId];
     let paramIndex = 2;
+
+    if (activeToday) {
+      conditions.push(`(
+        created_at >= CURRENT_DATE OR 
+        updated_at >= CURRENT_DATE OR 
+        status IN ('pending', 'processing', 'initiated', 'funded', 'delivery_confirmed', 'disputed')
+      )`);
+    }
 
     if (type) {
       conditions.push(`type = $${paramIndex++}`);

@@ -19,24 +19,28 @@ export const EscrowTransactionModel = {
       metadata?: Record<string, unknown>;
     }
   ): Promise<EscrowTransaction> {
+    const metadata = {
+      ...(data.metadata || {}),
+      sender_wallet_id: data.buyer_wallet_id,
+      receiver_wallet_id: data.seller_wallet_id,
+    };
+
     const { rows } = await client.query<EscrowTransaction>(
-      `INSERT INTO escrow_transactions
-        (reference, buyer_id, seller_id, buyer_wallet_id, seller_wallet_id,
-         item_description, item_photos, price, fee, currency, metadata, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'initiated')
+      `INSERT INTO transactions
+        (type, status, reference, amount, fee, currency, user_id, 
+         receiver_id, item_description, item_photos, metadata)
+       VALUES ('escrow', 'initiated', $1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         data.reference,
-        data.buyer_id,
-        data.seller_id,
-        data.buyer_wallet_id,
-        data.seller_wallet_id,
-        data.item_description,
-        data.item_photos,
         data.price,
         data.fee || '0',
         data.currency || 'NGN',
-        data.metadata ? JSON.stringify(data.metadata) : null,
+        data.buyer_id,
+        data.seller_id,
+        data.item_description,
+        data.item_photos,
+        JSON.stringify(metadata),
       ]
     );
     return rows[0];
@@ -44,7 +48,7 @@ export const EscrowTransactionModel = {
 
   async findById(id: string): Promise<EscrowTransaction | null> {
     const { rows } = await db.query<EscrowTransaction>(
-      `SELECT * FROM escrow_transactions WHERE id = $1`,
+      `SELECT * FROM transactions WHERE id = $1 AND type = 'escrow'`,
       [id]
     );
     return rows[0] ?? null;
@@ -52,7 +56,7 @@ export const EscrowTransactionModel = {
 
   async findByReference(reference: string): Promise<EscrowTransaction | null> {
     const { rows } = await db.query<EscrowTransaction>(
-      `SELECT * FROM escrow_transactions WHERE reference = $1`,
+      `SELECT * FROM transactions WHERE reference = $1 AND type = 'escrow'`,
       [reference]
     );
     return rows[0] ?? null;
@@ -63,7 +67,7 @@ export const EscrowTransactionModel = {
     id: string
   ): Promise<EscrowTransaction | null> {
     const { rows } = await client.query<EscrowTransaction>(
-      `SELECT * FROM escrow_transactions WHERE id = $1 FOR UPDATE`,
+      `SELECT * FROM transactions WHERE id = $1 AND type = 'escrow' FOR UPDATE`,
       [id]
     );
     return rows[0] ?? null;
@@ -89,7 +93,7 @@ export const EscrowTransactionModel = {
 
     values.push(id);
     await client.query(
-      `UPDATE escrow_transactions SET ${setClauses.join(', ')} WHERE id = $${paramIndex}`,
+      `UPDATE transactions SET ${setClauses.join(', ')} WHERE id = $${paramIndex} AND type = 'escrow'`,
       values
     );
   },
@@ -104,18 +108,18 @@ export const EscrowTransactionModel = {
     } = {}
   ): Promise<{ transactions: EscrowTransaction[]; total: number }> {
     const { role, status, limit = 20, offset = 0 } = options;
-    const conditions: string[] = [];
+    const conditions: string[] = ["type = 'escrow'"];
     const values: (string | number | boolean | Date | null)[] = [];
     let paramIndex = 1;
 
     if (role === 'buyer') {
-      conditions.push(`buyer_id = $${paramIndex++}`);
+      conditions.push(`user_id = $${paramIndex++}`);
       values.push(userId);
     } else if (role === 'seller') {
-      conditions.push(`seller_id = $${paramIndex++}`);
+      conditions.push(`receiver_id = $${paramIndex++}`);
       values.push(userId);
     } else {
-      conditions.push(`(buyer_id = $${paramIndex} OR seller_id = $${paramIndex})`);
+      conditions.push(`(user_id = $${paramIndex} OR receiver_id = $${paramIndex})`);
       paramIndex++;
       values.push(userId);
     }
@@ -125,16 +129,16 @@ export const EscrowTransactionModel = {
       values.push(status);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
     const countResult = await db.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM escrow_transactions ${whereClause}`,
+      `SELECT COUNT(*) as count FROM transactions ${whereClause}`,
       values
     );
 
     const dataValues = [...values, limit, offset];
     const { rows } = await db.query<EscrowTransaction>(
-      `SELECT * FROM escrow_transactions ${whereClause}
+      `SELECT * FROM transactions ${whereClause}
        ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       dataValues
     );
@@ -150,7 +154,7 @@ export const EscrowTransactionModel = {
     paystackReference: string
   ): Promise<void> {
     await db.query(
-      `UPDATE escrow_transactions SET paystack_reference = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE transactions SET paystack_reference = $1, updated_at = NOW() WHERE id = $2 AND type = 'escrow'`,
       [paystackReference, id]
     );
   },

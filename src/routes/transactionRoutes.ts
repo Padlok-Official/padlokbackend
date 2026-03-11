@@ -35,17 +35,6 @@ router.post(
   transactionController.initiateWithdrawal
 );
 
-// POST /api/v1/transactions/escrow - Initiate an escrow transaction
-router.post(
-  '/escrow',
-  walletTransactionLimiter,
-  requireWallet,
-  requirePin,
-  requireIdempotencyKey,
-  validators.escrowValidator,
-  handleValidationErrors,
-  transactionController.initiateEscrow
-);
 
 // GET /api/v1/transactions - List all transactions
 router.get(
@@ -61,31 +50,6 @@ router.get(
   validators.transactionByIdValidator,
   handleValidationErrors,
   transactionController.getTransactionById
-);
-
-// POST /api/v1/transactions/:id/confirm-delivery - Receiver confirms delivery (escrow)
-router.post(
-  '/:id/confirm-delivery',
-  validators.confirmDeliveryValidator,
-  handleValidationErrors,
-  transactionController.confirmDelivery
-);
-
-// POST /api/v1/transactions/:id/confirm-receipt - Sender confirms receipt, releases funds (escrow)
-router.post(
-  '/:id/confirm-receipt',
-  requirePin,
-  validators.confirmReceiptValidator,
-  handleValidationErrors,
-  transactionController.confirmReceipt
-);
-
-// POST /api/v1/transactions/:id/cancel - Cancel an escrow transaction
-router.post(
-  '/:id/cancel',
-  validators.transactionByIdValidator,
-  handleValidationErrors,
-  transactionController.cancelTransaction
 );
 
 export default router;
