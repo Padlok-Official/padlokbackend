@@ -2,6 +2,9 @@ import Paystack from "paystack-sdk";
 import crypto from "crypto";
 
 const secretKey = process.env.PAYSTACK_SECRET_KEY!;
+if (!secretKey) {
+  console.error("CRITICAL: PAYSTACK_SECRET_KEY is not defined in environment variables!");
+}
 const paystack = new Paystack(secretKey);
 
 class PaystackService {

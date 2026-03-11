@@ -65,8 +65,8 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
   let verified;
   try {
     verified = await paystackService.verifyTransaction(reference);
-  } catch {
-    console.error(`Failed to verify transaction ${reference}`);
+  } catch (err: any) {
+    console.error(`Failed to verify transaction ${reference}:`, err.message || err);
     return;
   }
 
