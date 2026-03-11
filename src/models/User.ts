@@ -7,7 +7,7 @@ const SALT_ROUNDS = 12;
 export const UserModel = {
   async findByEmail(email: string): Promise<(User & { password_hash: string; last_login_at: Date | null }) | null> {
     const { rows } = await db.query<User & { password_hash: string; last_login_at: Date | null }>(
-      `SELECT id, name, email, phone_number, password_hash, email_verified, phone_verified, is_active, fcm_token, created_at, last_login_at
+      `SELECT id, name, email, phone_number, username, bio, location, profile_photo, password_hash, email_verified, phone_verified, is_active, fcm_token, created_at, last_login_at
        FROM users WHERE email = $1 AND is_active = TRUE`,
       [email.toLowerCase().trim()]
     );
@@ -24,7 +24,7 @@ export const UserModel = {
 
   async findById(id: string): Promise<User | null> {
     const { rows } = await db.query<User>(
-      `SELECT id, name, email, phone_number, email_verified, phone_verified, is_active, fcm_token, created_at
+      `SELECT id, name, email, phone_number, username, bio, location, profile_photo, email_verified, phone_verified, is_active, fcm_token, created_at
        FROM users WHERE id = $1 AND is_active = TRUE`,
       [id]
     );
@@ -49,7 +49,7 @@ export const UserModel = {
     const { rows } = await db.query<User>(
       `INSERT INTO users (name, email, password_hash, phone_number)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, name, email, phone_number, email_verified, phone_verified, is_active, fcm_token, created_at`,
+       RETURNING id, name, email, phone_number, username, bio, location, profile_photo, email_verified, phone_verified, is_active, fcm_token, created_at`,
       [
         data.name.trim(),
         data.email.toLowerCase().trim(),
@@ -62,7 +62,14 @@ export const UserModel = {
 
   async update(
     id: string,
-    updates: { name?: string; phone_number?: string }
+    updates: { 
+      name?: string; 
+      phone_number?: string;
+      username?: string;
+      bio?: string;
+      location?: string;
+      profile_photo?: string;
+    }
   ): Promise<User | null> {
     const setClauses: string[] = [];
     const values: (string | number)[] = [];
@@ -76,6 +83,22 @@ export const UserModel = {
       setClauses.push(`phone_number = $${idx++}`);
       values.push(updates.phone_number.trim());
     }
+    if (updates.username !== undefined) {
+      setClauses.push(`username = $${idx++}`);
+      values.push(updates.username.trim().toLowerCase());
+    }
+    if (updates.bio !== undefined) {
+      setClauses.push(`bio = $${idx++}`);
+      values.push(updates.bio.trim());
+    }
+    if (updates.location !== undefined) {
+      setClauses.push(`location = $${idx++}`);
+      values.push(updates.location.trim());
+    }
+    if (updates.profile_photo !== undefined) {
+      setClauses.push(`profile_photo = $${idx++}`);
+      values.push(updates.profile_photo);
+    }
 
     if (setClauses.length === 0) return null;
 
@@ -83,7 +106,7 @@ export const UserModel = {
     const { rows } = await db.query<User>(
       `UPDATE users SET ${setClauses.join(', ')}, updated_at = NOW()
        WHERE id = $${idx}
-       RETURNING id, name, email, phone_number, email_verified, phone_verified, is_active, fcm_token, created_at`,
+       RETURNING id, name, email, phone_number, username, bio, location, profile_photo, email_verified, phone_verified, is_active, fcm_token, created_at`,
       values
     );
     return rows[0] ?? null;
@@ -105,6 +128,19 @@ export const UserModel = {
       'UPDATE users SET fcm_token = $1, updated_at = NOW() WHERE id = $2 AND (fcm_token IS DISTINCT FROM $1)',
       [token, id]
     );
+  },
+
+  async isUsernameTaken(username: string, excludeUserId?: string): Promise<boolean> {
+    const { rows } = excludeUserId
+      ? await db.query<{ id: string }>(
+        'SELECT id FROM users WHERE username = $1 AND id != $2',
+        [username.trim().toLowerCase(), excludeUserId]
+      )
+      : await db.query<{ id: string }>(
+        'SELECT id FROM users WHERE username = $1',
+        [username.trim().toLowerCase()]
+      );
+    return rows.length > 0;
   },
 
   async isPhoneNumberTaken(phoneNumber: string, excludeUserId?: string): Promise<boolean> {
@@ -145,12 +181,12 @@ export const UserModel = {
   async search(query: string, excludeUserId: string): Promise<User[]> {
     const searchTerm = `%${query.trim().toLowerCase()}%`;
     const { rows } = await db.query<User>(
-      `SELECT id, name, email, phone_number, email_verified, phone_verified, is_active, created_at
+      `SELECT id, name, email, phone_number, username, bio, location, profile_photo, email_verified, phone_verified, is_active, created_at
        FROM users 
-       WHERE (phone_number LIKE $1) 
+       WHERE (phone_number LIKE $1 OR name ILIKE $1 OR username ILIKE $1) 
        AND id != $2
        AND is_active = TRUE
-       ORDER BY phone_verified DESC
+       ORDER BY phone_verified DESC, name ASC
        LIMIT 10`,
       [searchTerm, excludeUserId]
     );

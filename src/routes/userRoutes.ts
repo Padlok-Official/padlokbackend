@@ -28,6 +28,20 @@ router.patch(
   updateProfile
 );
 
+router.patch(
+  '/profile',
+  updateProfileValidator,
+  handleValidationErrors,
+  updateProfile
+);
+
+router.put(
+  '/profile',
+  updateProfileValidator,
+  handleValidationErrors,
+  updateProfile
+);
+
 router.post(
   '/change-password',
   changePasswordValidator,
