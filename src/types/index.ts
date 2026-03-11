@@ -180,6 +180,8 @@ export interface Transaction {
   delivery_deadline?: Date;
   delivery_confirmed_at?: Date;
   receiver_confirmed_at?: Date;
+  sender_name?: string;
+  receiver_name?: string;
   metadata?: Record<string, unknown>;
   created_at: Date;
   updated_at: Date;

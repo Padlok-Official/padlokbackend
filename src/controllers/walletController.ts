@@ -2,8 +2,8 @@ import { Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import { v4 as uuidv4 } from "uuid";
 import db from "../config/database";
-import { WalletModel, WalletTransactionModel, AuditLogModel } from "../models";
-import { PaymentMethodModel } from "../models";
+import { WalletModel, AuditLogModel, PaymentMethodModel } from "../models";
+import { TransactionModel } from "../models/Transaction";
 import { paystackService } from "../services/paystackService";
 import { AuthenticatedRequest, Wallet } from "../types";
 
@@ -176,16 +176,19 @@ export const fundWallet = async (
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await WalletTransactionModel.create(client, {
-        wallet_id: wallet.id,
-        type: "funding",
+      await TransactionModel.create(client, {
+        type: "deposit",
         amount,
-        balance_before: wallet.balance,
-        balance_after: wallet.balance,
+        user_id: req.user!.id,
         status: "pending",
         reference,
         paystack_reference: paystackResult.reference,
-        description: "Wallet funding via Paystack",
+        item_description: "Wallet funding via Paystack",
+        metadata: { 
+          wallet_id: wallet.id,
+          balance_before: wallet.balance,
+          source: 'wallet_funding'
+        },
       });
       await client.query("COMMIT");
     } catch (err) {
@@ -233,40 +236,40 @@ export const verifyFunding = async (
     const { reference } = req.params;
     const wallet = req.wallet!;
 
-    // Find the wallet transaction by reference
-    const walletTx = await WalletTransactionModel.findByReference(reference);
+    // Find the transaction by reference in the unified table
+    const transaction = await TransactionModel.findByReference(reference);
 
-    if (!walletTx || walletTx.wallet_id !== wallet.id) {
+    if (!transaction || transaction.user_id !== req.user!.id) {
       return res
         .status(404)
         .json({ success: false, message: "Transaction not found" });
     }
 
     // If already completed (e.g. by webhook), return success immediately
-    if (walletTx.status === "completed") {
+    if (transaction.status === "completed") {
       return res.status(200).json({
         success: true,
         message: "Transaction already completed",
         data: {
           status: "completed",
-          amount: walletTx.amount,
-          reference: walletTx.reference,
+          amount: transaction.amount,
+          reference: transaction.reference,
         },
       });
     }
 
-    if (walletTx.status === "failed") {
+    if (transaction.status === "failed") {
       return res.status(200).json({
         success: true,
         data: {
           status: "failed",
-          reference: walletTx.reference,
+          reference: transaction.reference,
         },
       });
     }
 
     // Transaction still pending — verify with Paystack
-    const paystackRef = walletTx.paystack_reference || reference;
+    const paystackRef = transaction.paystack_reference || reference;
     let verified;
     try {
       verified = await paystackService.verifyTransaction(paystackRef);
@@ -276,7 +279,7 @@ export const verifyFunding = async (
         success: true,
         data: {
           status: "pending",
-          reference: walletTx.reference,
+          reference: transaction.reference,
         },
       });
     }
@@ -290,8 +293,8 @@ export const verifyFunding = async (
 
         // Re-check status inside transaction to avoid race with webhook
         const { rows } = await client.query(
-          `SELECT status FROM wallet_transactions WHERE id = $1 FOR UPDATE`,
-          [walletTx.id],
+          `SELECT status FROM transactions WHERE id = $1 FOR UPDATE`,
+          [transaction.id],
         );
 
         if (rows[0]?.status === "pending") {
@@ -301,14 +304,16 @@ export const verifyFunding = async (
             wallet.id,
             amountInNaira,
           );
-          await WalletTransactionModel.updateStatus(
+          await TransactionModel.updateStatus(
             client,
-            walletTx.id,
+            transaction.id,
             "completed",
-          );
-          await client.query(
-            `UPDATE wallet_transactions SET balance_after = $1 WHERE id = $2`,
-            [balanceResult.balance_after, walletTx.id],
+            {
+              metadata: {
+                ...transaction.metadata,
+                balance_after: balanceResult.balance_after
+              }
+            }
           );
         }
 
@@ -326,7 +331,7 @@ export const verifyFunding = async (
         data: {
           status: "completed",
           amount: (verified.amount / 100).toFixed(2),
-          reference: walletTx.reference,
+          reference: transaction.reference,
         },
       });
     }
@@ -336,7 +341,7 @@ export const verifyFunding = async (
       success: true,
       data: {
         status: verified.status === "abandoned" ? "cancelled" : "pending",
-        reference: walletTx.reference,
+        reference: transaction.reference,
       },
     });
   } catch (err) {
@@ -387,21 +392,26 @@ export const withdraw = async (
     const pool = db.getPool()!;
     const client = await pool.connect();
     let balanceResult: { balance_before: string; balance_after: string };
+    let transaction;
 
     try {
       await client.query("BEGIN");
       await WalletModel.resetSpendingIfNeeded(client, wallet.id);
       balanceResult = await WalletModel.debitBalance(client, wallet.id, amount);
 
-      await WalletTransactionModel.create(client, {
-        wallet_id: wallet.id,
+      transaction = await TransactionModel.create(client, {
         type: "withdrawal",
         amount,
-        balance_before: balanceResult.balance_before,
-        balance_after: balanceResult.balance_after,
+        user_id: req.user!.id,
         status: "pending",
         reference,
-        description: `Withdrawal to ${paymentMethod.provider || "bank"} - ****${(paymentMethod as any).last_four || ""}`,
+        payment_method_id,
+        item_description: `Withdrawal to ${paymentMethod.provider || "bank"} - ****${(paymentMethod as any).last_four || ""}`,
+        metadata: {
+          wallet_id: wallet.id,
+          balance_before: balanceResult.balance_before,
+          balance_after: balanceResult.balance_after,
+        },
       });
 
       await client.query("COMMIT");
@@ -435,12 +445,10 @@ export const withdraw = async (
       try {
         await reverseClient.query("BEGIN");
         await WalletModel.creditBalance(reverseClient, wallet.id, amount);
-        const walletTx =
-          await WalletTransactionModel.findByReference(reference);
-        if (walletTx) {
-          await WalletTransactionModel.updateStatus(
+        if (transaction) {
+          await TransactionModel.updateStatus(
             reverseClient,
-            walletTx.id,
+            transaction.id,
             "failed",
           );
         }
@@ -489,7 +497,7 @@ export const getTransactionHistory = async (
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = (page - 1) * limit;
 
-    const result = await WalletTransactionModel.findByWalletId(wallet.id, {
+    const result = await TransactionModel.findByUserId(req.user!.id, {
       limit,
       offset,
       type: req.query.type as any,
@@ -526,9 +534,9 @@ export const getTransactionById = async (
 ): Promise<void | Response> => {
   try {
     const wallet = req.wallet!;
-    const transaction = await WalletTransactionModel.findById(req.params.id);
+    const transaction = await TransactionModel.findById(req.params.id);
 
-    if (!transaction || transaction.wallet_id !== wallet.id) {
+    if (!transaction || (transaction.user_id !== req.user!.id && transaction.receiver_id !== req.user!.id)) {
       return res.status(404).json({
         success: false,
         message: "Transaction not found",

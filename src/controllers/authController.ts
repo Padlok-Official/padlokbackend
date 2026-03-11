@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { UserModel, WalletModel, RefreshTokenModel } from '../models';
 import { User, AuthenticatedRequest } from '../types';
+import { getCurrencyFromPhoneNumber } from '../utils/currencyUtils';
 
 const JWT_SECRET = process.env.JWT_SECRET as string;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '7d';
@@ -57,7 +58,8 @@ export const register = async (
       phone_number,
     });
 
-    await WalletModel.create(user.id);
+    const currency = getCurrencyFromPhoneNumber(phone_number);
+    await WalletModel.create(user.id, currency);
 
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email },

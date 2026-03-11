@@ -132,46 +132,50 @@ export const TransactionModel = {
     } = {}
   ): Promise<{ transactions: Transaction[]; total: number }> {
     const { type, status, limit = 20, offset = 0, from, to, activeToday } = options;
-    const conditions: string[] = ['(user_id = $1 OR receiver_id = $1)'];
+    const conditions: string[] = ['(t.user_id = $1 OR t.receiver_id = $1)'];
     const values: (string | number | boolean | Date | null)[] = [userId];
     let paramIndex = 2;
 
     if (activeToday) {
       conditions.push(`(
-        created_at >= CURRENT_DATE OR 
-        updated_at >= CURRENT_DATE OR 
-        status IN ('pending', 'processing', 'initiated', 'funded', 'delivery_confirmed', 'disputed')
+        t.created_at >= CURRENT_DATE OR 
+        t.updated_at >= CURRENT_DATE OR 
+        t.status IN ('pending', 'processing', 'initiated', 'funded', 'delivery_confirmed', 'disputed')
       )`);
     }
 
     if (type) {
-      conditions.push(`type = $${paramIndex++}`);
+      conditions.push(`t.type = $${paramIndex++}`);
       values.push(type);
     }
     if (status) {
-      conditions.push(`status = $${paramIndex++}`);
+      conditions.push(`t.status = $${paramIndex++}`);
       values.push(status);
     }
     if (from) {
-      conditions.push(`created_at >= $${paramIndex++}`);
+      conditions.push(`t.created_at >= $${paramIndex++}`);
       values.push(from);
     }
     if (to) {
-      conditions.push(`created_at <= $${paramIndex++}`);
+      conditions.push(`t.created_at <= $${paramIndex++}`);
       values.push(to);
     }
 
     const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
     const countResult = await db.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM transactions ${whereClause}`,
+      `SELECT COUNT(*) as count FROM transactions t ${whereClause}`,
       values
     );
 
     const dataValues = [...values, limit, offset];
     const { rows } = await db.query<Transaction>(
-      `SELECT * FROM transactions ${whereClause}
-       ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      `SELECT t.*, u_sender.name as sender_name, u_receiver.name as receiver_name
+       FROM transactions t
+       LEFT JOIN users u_sender ON t.user_id = u_sender.id
+       LEFT JOIN users u_receiver ON t.receiver_id = u_receiver.id
+       ${whereClause}
+       ORDER BY t.created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       dataValues
     );
 
