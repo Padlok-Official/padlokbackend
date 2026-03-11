@@ -19,7 +19,7 @@ router.post(
   '/initiate',
   walletTransactionLimiter,
   requireWallet,
-  requirePin,
+  // requirePin,
   requireIdempotencyKey,
   validators.initiateEscrowValidator,
   handleValidationErrors,
