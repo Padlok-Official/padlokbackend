@@ -170,7 +170,11 @@ export const searchUsers = async (
       });
     }
 
-    const users = await UserModel.search(q);
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const users = await UserModel.search(q, req.user.id);
 
     res.json({
       success: true,
