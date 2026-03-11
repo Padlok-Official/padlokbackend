@@ -9,6 +9,8 @@ import {
   AuditLogModel,
 } from '../models';
 import { UserModel } from '../models';
+import cloudinaryService from '../services/cloudinaryService';
+
 import { AuthenticatedRequest, Wallet } from '../types';
 
 type WalletRequest = AuthenticatedRequest & { wallet?: Wallet };
@@ -641,6 +643,51 @@ export const getDisputes = async (
           total: result.total,
           total_pages: Math.ceil(result.total / limit),
         },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /api/v1/escrow/upload-images
+ * Upload item images to Cloudinary. Returns the secure URLs.
+ */
+export const uploadItemImages = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> => {
+  try {
+    const { images } = req.body; // Array of base64 strings
+
+    if (!images || !Array.isArray(images) || images.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No images provided',
+      });
+    }
+
+    if (images.length > 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum 5 images allowed',
+      });
+    }
+
+    const uploadPromises = images.map((image) => 
+      cloudinaryService.uploadImage(image, 'escrow_items')
+    );
+
+    const results = await Promise.all(uploadPromises);
+    const imageUrls = results.map((r) => r.url);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Images uploaded successfully',
+      data: {
+        urls: imageUrls,
       },
     });
   } catch (err) {

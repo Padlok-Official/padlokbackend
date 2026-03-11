@@ -26,6 +26,12 @@ router.post(
   escrowController.initiateEscrow
 );
 
+// POST /api/v1/escrow/upload-images - Upload item images
+router.post(
+  '/upload-images',
+  escrowController.uploadItemImages
+);
+
 // GET /api/v1/escrow - List user's escrow transactions
 router.get(
   '/',
