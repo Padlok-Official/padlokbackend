@@ -62,8 +62,8 @@ export const UserModel = {
 
   async update(
     id: string,
-    updates: { 
-      name?: string; 
+    updates: {
+      name?: string;
       phone_number?: string;
       username?: string;
       bio?: string;
