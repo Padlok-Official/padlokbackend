@@ -16,8 +16,6 @@ export const broadcastNotification = async (
             });
         }
 
-        console.log("Hello")
-
         const navigationPayload = screen ? { screen, params } : undefined;
         const result = await NotificationService.broadcastNotification(title, body, navigationPayload);
 
