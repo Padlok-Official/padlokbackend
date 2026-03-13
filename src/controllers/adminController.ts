@@ -19,6 +19,8 @@ export const broadcastNotification = async (
         const navigationPayload = screen ? { screen, params } : undefined;
         const result = await NotificationService.broadcastNotification(title, body, navigationPayload);
 
+        console.log("udpate")
+
         return res.json({
             success: true,
             message: 'Broadcast notification sent successfully',
