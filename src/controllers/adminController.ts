@@ -15,9 +15,6 @@ export const broadcastNotification = async (
                 message: 'Title and body are required',
             });
         }
-
-        console.log('update inggg')
-
         const navigationPayload = screen ? { screen, params } : undefined;
         const result = await NotificationService.broadcastNotification(title, body, navigationPayload);
 
