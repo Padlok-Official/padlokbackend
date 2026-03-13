@@ -236,8 +236,6 @@ export const getTransactions = async (
       activeToday: req.query.todayOnly === 'true',
     });
 
-    console.log(result);
-
     return res.status(200).json({
       success: true,
       data: {

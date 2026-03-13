@@ -10,6 +10,7 @@ import {
   WalletTransactionModel,
 } from '../models';
 import cloudinaryService from '../services/cloudinaryService';
+import socketService from '../services/socketService';
 
 import { AuthenticatedRequest, Wallet } from '../types';
 
@@ -128,6 +129,17 @@ export const initiateEscrow = async (
         user_agent: req.headers['user-agent'],
       });
 
+      // Emit socket event to seller
+      socketService.emitToUser(seller.id, 'escrow:initiated', {
+        id: escrowTx.id,
+        reference: escrowTx.reference,
+        buyer_name: req.user!.name,
+        price,
+        item_description,
+      });
+
+
+
       return res.status(201).json({
         success: true,
         message: 'Escrow transaction initiated. Funds locked.',
@@ -212,6 +224,12 @@ export const confirmDelivery = async (
       });
 
       await client.query('COMMIT');
+
+      // Emit socket event to buyer
+      socketService.emitToUser(escrowTx.user_id, 'escrow:delivery_confirmed', {
+        id: escrowTx.id,
+        delivery_deadline: deliveryDeadline,
+      });
 
       return res.status(200).json({
         success: true,
@@ -318,6 +336,16 @@ export const confirmReceipt = async (
 
       await client.query('COMMIT');
 
+      // Emit socket events to both parties
+      socketService.emitToUser(escrowTx.receiver_id, 'escrow:completed', {
+        id: escrowTx.id,
+        message: 'Funds released to your wallet',
+      });
+      socketService.emitToUser(escrowTx.user_id, 'escrow:completed', {
+        id: escrowTx.id,
+        message: 'Transaction completed successfully',
+      });
+
       return res.status(200).json({
         success: true,
         message: 'Receipt confirmed. Funds released to seller.',
@@ -388,6 +416,14 @@ export const raiseDispute = async (
 
       await client.query('COMMIT');
 
+      // Notify the other party about the dispute
+      const otherUserId = req.user!.id === escrowTx.user_id ? escrowTx.receiver_id : escrowTx.user_id;
+      socketService.emitToUser(otherUserId, 'escrow:disputed', {
+        id: escrowTx.id,
+        reason,
+        raised_by: req.user!.name,
+      });
+
       await AuditLogModel.log({
         user_id: req.user!.id,
         action: 'dispute_raised',
@@ -450,6 +486,13 @@ export const cancelEscrow = async (
       await client.query('BEGIN');
       await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'cancelled');
       await client.query('COMMIT');
+
+      // Notify seller that the escrow was cancelled
+      socketService.emitToUser(escrowTx.receiver_id, 'escrow:cancelled', {
+        id: escrowTx.id,
+        reference: escrowTx.reference,
+        message: 'The buyer has cancelled the escrow transaction.',
+      });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -643,6 +686,18 @@ export const resolveDispute = async (
       }
 
       await client.query('COMMIT');
+
+      // Notify both parties about the resolution
+      socketService.emitToUser(escrowTx.user_id, 'escrow:dispute_resolved', {
+        id: escrowTx.id,
+        resolution,
+        message: `Dispute resolved. Funds ${resolution === 'refund' ? 'refunded to you' : 'released to seller'}.`,
+      });
+      socketService.emitToUser(escrowTx.receiver_id, 'escrow:dispute_resolved', {
+        id: escrowTx.id,
+        resolution,
+        message: `Dispute resolved. Funds ${resolution === 'refund' ? 'refunded to buyer' : 'released to you'}.`,
+      });
 
       await AuditLogModel.log({
         user_id: req.user!.id,

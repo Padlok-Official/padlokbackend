@@ -1,6 +1,8 @@
 import "dotenv/config";
+import http from "http";
 import app from "./app";
 import db from "./config/database";
+import socketService from "./services/socketService";
 import { setupPaystackWorker } from "./workers/paystackWorker";
 
 const PORT = Number(process.env.PORT) || 6000;
@@ -24,11 +26,15 @@ async function startServer(): Promise<void> {
   try {
     await db.connect();
 
-    const server = app.listen(PORT, "0.0.0.0", () => {
+    const httpServer = http.createServer(app);
+
+    const server = httpServer.listen(PORT, "0.0.0.0", () => {
       console.log(
         `Server running on port ${PORT} (${process.env.NODE_ENV ?? "development"})`,
       );
     });
+
+    await socketService.initialize(server);
 
     const worker = setupPaystackWorker();
 
