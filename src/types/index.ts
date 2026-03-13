@@ -24,6 +24,7 @@ export interface Wallet {
   id: string;
   user_id: string;
   balance: string;
+  escrow_balance: string;
   currency: string;
   status: 'active' | 'frozen' | 'suspended';
   created_at: Date;
@@ -68,6 +69,7 @@ export interface WalletWithPin extends Wallet {
   pin_locked_until?: Date;
   daily_limit: string;
   monthly_limit: string;
+  escrow_balance: string;
   daily_spent: string;
   monthly_spent: string;
   daily_spent_reset_at: string;

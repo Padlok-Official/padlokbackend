@@ -5,7 +5,7 @@ import { Wallet, WalletWithPin } from '../types';
 export const WalletModel = {
   async findByUserId(userId: string): Promise<Wallet | null> {
     const { rows } = await db.query<Wallet>(
-      `SELECT id, user_id, balance, currency, status, created_at, updated_at
+      `SELECT id, user_id, balance, escrow_balance, currency, status, created_at, updated_at
        FROM wallets WHERE user_id = $1`,
       [userId]
     );
@@ -21,7 +21,7 @@ export const WalletModel = {
 
   async findById(walletId: string): Promise<Wallet | null> {
     const { rows } = await db.query<Wallet>(
-      `SELECT id, user_id, balance, currency, status, created_at, updated_at
+      `SELECT id, user_id, balance, escrow_balance, currency, status, created_at, updated_at
        FROM wallets WHERE id = $1`,
       [walletId]
     );
@@ -30,7 +30,7 @@ export const WalletModel = {
 
   async findByUserIdWithPin(userId: string): Promise<WalletWithPin | null> {
     const { rows } = await db.query<WalletWithPin>(
-      `SELECT id, user_id, balance, currency, status, pin_hash, pin_set_at,
+      `SELECT id, user_id, balance, escrow_balance, currency, status, pin_hash, pin_set_at,
               pin_attempts, pin_locked_until, daily_limit, monthly_limit,
               daily_spent, monthly_spent, daily_spent_reset_at, monthly_spent_reset_at,
               created_at, updated_at
@@ -133,6 +133,36 @@ export const WalletModel = {
     );
 
     return { balance_before: wallet.balance, balance_after: updated.balance };
+  },
+
+  /**
+   * Credit escrow balance.
+   */
+  async creditEscrow(
+    client: PoolClient,
+    walletId: string,
+    amount: string
+  ): Promise<void> {
+    await client.query(
+      `UPDATE wallets SET escrow_balance = escrow_balance + $1, updated_at = NOW()
+       WHERE id = $2`,
+      [amount, walletId]
+    );
+  },
+
+  /**
+   * Debit escrow balance.
+   */
+  async debitEscrow(
+    client: PoolClient,
+    walletId: string,
+    amount: string
+  ): Promise<void> {
+    await client.query(
+      `UPDATE wallets SET escrow_balance = escrow_balance - $1, updated_at = NOW()
+       WHERE id = $2`,
+      [amount, walletId]
+    );
   },
 
   async resetSpendingIfNeeded(client: PoolClient, walletId: string): Promise<void> {

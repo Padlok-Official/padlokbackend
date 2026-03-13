@@ -1,14 +1,14 @@
-import { Response, NextFunction } from 'express';
+import { NextFunction, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../config/database';
 import {
-  WalletModel,
-  EscrowTransactionModel,
-  WalletTransactionModel,
-  DisputeModel,
   AuditLogModel,
+  DisputeModel,
+  EscrowTransactionModel,
+  UserModel,
+  WalletModel,
+  WalletTransactionModel,
 } from '../models';
-import { UserModel } from '../models';
 import cloudinaryService from '../services/cloudinaryService';
 
 import { AuthenticatedRequest, Wallet } from '../types';
@@ -53,12 +53,18 @@ export const initiateEscrow = async (
       });
     }
 
-    // Calculate fees (3% platform fee)
     const platformFeeRate = 0.03;
     const fee = Math.round(price * platformFeeRate * 100) / 100; // Round to 2 decimal places
     const totalAmount = price + fee;
 
-    // Check spending limits
+    if (parseFloat(buyerWallet.balance) < totalAmount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient wallet balance',
+      });
+    }
+
+    // 2. Check spending limits
     const limitCheck = await WalletModel.checkSpendingLimits(buyerWallet.id, totalAmount.toString());
     if (!limitCheck.allowed) {
       return res.status(400).json({ success: false, message: limitCheck.reason });
@@ -89,20 +95,25 @@ export const initiateEscrow = async (
         fee: fee.toString(),
       });
 
+      // Update escrow balances (Only the principal price is locked in escrow)
+      await WalletModel.creditEscrow(client, buyerWallet.id, price.toString());
+      await WalletModel.creditEscrow(client, sellerWallet.id, price.toString());
+
       // Update escrow status to funded
       await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'funded');
 
-      // Record wallet transaction (escrow lock)
+      // Record wallet transaction (escrow lock) - separate the amount and the fee
       await WalletTransactionModel.create(client, {
         wallet_id: buyerWallet.id,
         type: 'escrow_lock',
-        amount: totalAmount.toString(),
+        amount: price.toString(),
+        fee: fee.toString(),
         balance_before: balanceResult.balance_before,
         balance_after: balanceResult.balance_after,
         status: 'completed',
         reference: `${reference}_lock`,
         escrow_transaction_id: escrowTx.id,
-        description: `Escrow payment for: ${item_description.substring(0, 100)} (Includes GH₵${fee} fee)`,
+        description: `Escrow payment for: ${item_description.substring(0, 100)}`,
       });
 
       await client.query('COMMIT');
@@ -157,59 +168,64 @@ export const confirmDelivery = async (
   next: NextFunction
 ): Promise<void | Response> => {
   try {
-    const escrowTx = await EscrowTransactionModel.findById(req.params.id);
-
-    if (!escrowTx) {
-      return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
-    }
-
-    if (escrowTx.receiver_id !== req.user!.id) {
-      return res.status(403).json({ success: false, message: 'Only the seller can confirm delivery' });
-    }
-
-    if (escrowTx.status !== 'funded') {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot confirm delivery. Current status: ${escrowTx.status}`,
-      });
-    }
-
-    // Set delivery deadline (1 hour from now)
-    const deliveryDeadline = new Date(Date.now() + 60 * 60 * 1000);
-
     const pool = db.getPool()!;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(client, req.params.id);
+
+      if (!escrowTx) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+      }
+
+      if (escrowTx.receiver_id !== req.user!.id) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ success: false, message: 'Only the seller can confirm delivery' });
+      }
+
+      if (escrowTx.status !== 'funded' && escrowTx.status !== 'initiated') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Cannot confirm delivery. Current status: ${escrowTx.status}`,
+        });
+      }
+
+      // Set delivery deadline (1 hour from now)
+      const deliveryDeadline = new Date(Date.now() + 60 * 60 * 1000);
+
       await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'delivery_confirmed', {
         delivery_confirmed_at: new Date(),
         delivery_deadline: deliveryDeadline,
       });
+
+      await AuditLogModel.log({
+        user_id: req.user!.id,
+        action: 'delivery_confirmed',
+        entity_type: 'escrow_transaction',
+        entity_id: escrowTx.id,
+        details: { delivery_deadline: deliveryDeadline.toISOString() },
+        ip_address: req.ip,
+        user_agent: req.headers['user-agent'],
+      });
+
       await client.query('COMMIT');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Delivery confirmed. Buyer has until the deadline to confirm receipt or raise a dispute.',
+        data: {
+          delivery_deadline: deliveryDeadline,
+        },
+      });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
     } finally {
       client.release();
     }
-
-    await AuditLogModel.log({
-      user_id: req.user!.id,
-      action: 'delivery_confirmed',
-      entity_type: 'escrow_transaction',
-      entity_id: escrowTx.id,
-      details: { delivery_deadline: deliveryDeadline.toISOString() },
-      ip_address: req.ip,
-      user_agent: req.headers['user-agent'],
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Delivery confirmed. Buyer has until the deadline to confirm receipt or raise a dispute.',
-      data: {
-        delivery_deadline: deliveryDeadline,
-      },
-    });
   } catch (err) {
     next(err);
   }
@@ -225,29 +241,33 @@ export const confirmReceipt = async (
   next: NextFunction
 ): Promise<void | Response> => {
   try {
-    const escrowTx = await EscrowTransactionModel.findById(req.params.id);
-
-    if (!escrowTx) {
-      return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
-    }
-
-    if (escrowTx.user_id !== req.user!.id) {
-      return res.status(403).json({ success: false, message: 'Only the buyer can confirm receipt' });
-    }
-
-    if (escrowTx.status !== 'delivery_confirmed') {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot confirm receipt. Current status: ${escrowTx.status}`,
-      });
-    }
-
     const pool = db.getPool()!;
     const client = await pool.connect();
-    const releaseReference = `${escrowTx.reference}_release`;
 
     try {
       await client.query('BEGIN');
+
+      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(client, req.params.id);
+
+      if (!escrowTx) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+      }
+
+      if (escrowTx.user_id !== req.user!.id) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ success: false, message: 'Only the buyer can confirm receipt' });
+      }
+
+      if (escrowTx.status !== 'delivery_confirmed') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Cannot confirm receipt. Current status: ${escrowTx.status}`,
+        });
+      }
+
+      const releaseReference = `${escrowTx.reference}_release`;
 
       // Credit seller's wallet
       const sellerWalletId = (escrowTx.metadata as any)?.receiver_wallet_id;
@@ -279,28 +299,35 @@ export const confirmReceipt = async (
         description: `Escrow release: ${escrowTx.item_description.substring(0, 100)}`,
       });
 
+      // Update escrow balances (reduce for both - principal only)
+      const buyerWalletId = (escrowTx.metadata as any)?.sender_wallet_id;
+      if (buyerWalletId) {
+        await WalletModel.debitEscrow(client, buyerWalletId, escrowTx.amount);
+      }
+      await WalletModel.debitEscrow(client, sellerWalletId, escrowTx.amount);
+
+      await AuditLogModel.log({
+        user_id: req.user!.id,
+        action: 'receipt_confirmed',
+        entity_type: 'escrow_transaction',
+        entity_id: escrowTx.id,
+        details: { price: escrowTx.amount, seller_id: escrowTx.receiver_id },
+        ip_address: req.ip,
+        user_agent: req.headers['user-agent'],
+      });
+
       await client.query('COMMIT');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Receipt confirmed. Funds released to seller.',
+      });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
     } finally {
       client.release();
     }
-
-    await AuditLogModel.log({
-      user_id: req.user!.id,
-      action: 'receipt_confirmed',
-      entity_type: 'escrow_transaction',
-      entity_id: escrowTx.id,
-      details: { price: escrowTx.amount, seller_id: escrowTx.receiver_id },
-      ip_address: req.ip,
-      user_agent: req.headers['user-agent'],
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Receipt confirmed. Funds released to seller.',
-    });
   } catch (err) {
     next(err);
   }
@@ -604,6 +631,17 @@ export const resolveDispute = async (
         await DisputeModel.updateStatus(client, dispute.id, 'resolved_release', req.user!.id, admin_notes);
       }
 
+      // Update escrow balances (reduce for both regardless of resolution - principal only)
+      const buyerWalletId = (escrowTx.metadata as any)?.sender_wallet_id;
+      const sellerWalletId = (escrowTx.metadata as any)?.receiver_wallet_id;
+
+      if (buyerWalletId) {
+        await WalletModel.debitEscrow(client, buyerWalletId, escrowTx.amount);
+      }
+      if (sellerWalletId) {
+        await WalletModel.debitEscrow(client, sellerWalletId, escrowTx.amount);
+      }
+
       await client.query('COMMIT');
 
       await AuditLogModel.log({
@@ -699,7 +737,7 @@ export const uploadItemImages = async (
       });
     }
 
-    const uploadPromises = images.map((image) => 
+    const uploadPromises = images.map((image) =>
       cloudinaryService.uploadImage(image, 'escrow_items')
     );
 
