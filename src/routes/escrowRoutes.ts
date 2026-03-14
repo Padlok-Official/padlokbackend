@@ -43,6 +43,14 @@ router.get(
 // GET /api/v1/escrow/:id - Get escrow transaction detail
 router.get('/:id', escrowController.getEscrowById);
 
+// POST /api/v1/escrow/:id/set-delivery - Seller sets delivery window & funds escrow
+router.post(
+  '/:id/set-delivery',
+  validators.setDeliveryValidator,
+  handleValidationErrors,
+  escrowController.setDeliveryAndFund
+);
+
 // POST /api/v1/escrow/:id/confirm-delivery - Seller confirms delivery
 router.post(
   '/:id/confirm-delivery',

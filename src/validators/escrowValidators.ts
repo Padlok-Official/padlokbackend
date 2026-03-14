@@ -27,6 +27,16 @@ export const initiateEscrowValidator = [
     .withMessage('Transaction PIN is required'),
 ];
 
+export const setDeliveryValidator = [
+  param('id')
+    .isUUID()
+    .withMessage('Valid escrow transaction ID is required'),
+  body('delivery_hours')
+    .isInt()
+    .isIn([1, 2, 3, 6, 12, 24, 48, 72])
+    .withMessage('delivery_hours must be one of: 1, 2, 3, 6, 12, 24, 48, 72'),
+];
+
 export const confirmDeliveryValidator = [
   param('id')
     .isUUID()

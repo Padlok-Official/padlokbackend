@@ -18,7 +18,9 @@ type WalletRequest = AuthenticatedRequest & { wallet?: Wallet };
 
 /**
  * POST /api/v1/escrow/initiate
- * Buyer initiates an escrow transaction. Funds are locked from buyer's wallet.
+ * Buyer initiates an escrow transaction. NO funds are deducted yet.
+ * The transaction is created with status 'initiated'. Funds are locked
+ * only when the seller sets the delivery window and activates the escrow.
  */
 export const initiateEscrow = async (
   req: WalletRequest,
@@ -55,21 +57,7 @@ export const initiateEscrow = async (
     }
 
     const platformFeeRate = 0.03;
-    const fee = Math.round(price * platformFeeRate * 100) / 100; // Round to 2 decimal places
-    const totalAmount = price + fee;
-
-    if (parseFloat(buyerWallet.balance) < totalAmount) {
-      return res.status(400).json({
-        success: false,
-        message: 'Insufficient wallet balance',
-      });
-    }
-
-    // 2. Check spending limits
-    const limitCheck = await WalletModel.checkSpendingLimits(buyerWallet.id, totalAmount.toString());
-    if (!limitCheck.allowed) {
-      return res.status(400).json({ success: false, message: limitCheck.reason });
-    }
+    const fee = Math.round(price * platformFeeRate * 100) / 100;
 
     const pool = db.getPool()!;
     const client = await pool.connect();
@@ -77,13 +65,7 @@ export const initiateEscrow = async (
     try {
       await client.query('BEGIN');
 
-      // Reset spending if needed
-      await WalletModel.resetSpendingIfNeeded(client, buyerWallet.id);
-
-      // Debit buyer's wallet (lock total funds in escrow: price + fee)
-      const balanceResult = await WalletModel.debitBalance(client, buyerWallet.id, totalAmount.toString());
-
-      // Create escrow transaction
+      // Create escrow transaction with status 'initiated' — no funds deducted yet
       const escrowTx = await EscrowTransactionModel.create(client, {
         reference,
         buyer_id: req.user!.id,
@@ -96,27 +78,6 @@ export const initiateEscrow = async (
         fee: fee.toString(),
       });
 
-      // Update escrow balances (Only the principal price is locked in escrow)
-      await WalletModel.creditEscrow(client, buyerWallet.id, price.toString());
-      await WalletModel.creditEscrow(client, sellerWallet.id, price.toString());
-
-      // Update escrow status to funded
-      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'funded');
-
-      // Record wallet transaction (escrow lock) - separate the amount and the fee
-      await WalletTransactionModel.create(client, {
-        wallet_id: buyerWallet.id,
-        type: 'escrow_lock',
-        amount: price.toString(),
-        fee: fee.toString(),
-        balance_before: balanceResult.balance_before,
-        balance_after: balanceResult.balance_after,
-        status: 'completed',
-        reference: `${reference}_lock`,
-        escrow_transaction_id: escrowTx.id,
-        description: `Escrow payment for: ${item_description.substring(0, 100)}`,
-      });
-
       await client.query('COMMIT');
 
       await AuditLogModel.log({
@@ -124,7 +85,7 @@ export const initiateEscrow = async (
         action: 'escrow_initiated',
         entity_type: 'escrow_transaction',
         entity_id: escrowTx.id,
-        details: { price, fee, totalAmount, seller_id: seller.id, reference },
+        details: { price, fee, seller_id: seller.id, reference },
         ip_address: req.ip,
         user_agent: req.headers['user-agent'],
       });
@@ -138,18 +99,15 @@ export const initiateEscrow = async (
         item_description,
       });
 
-
-
       return res.status(201).json({
         success: true,
-        message: 'Escrow transaction initiated. Funds locked.',
+        message: 'Escrow transaction initiated. Awaiting seller to set delivery window.',
         data: {
           id: escrowTx.id,
           reference: escrowTx.reference,
-          status: 'funded',
+          status: 'initiated',
           price,
           fee,
-          totalAmount,
           seller_email,
           item_description,
           item_photos,
@@ -158,8 +116,172 @@ export const initiateEscrow = async (
       });
     } catch (err) {
       await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /api/v1/escrow/:id/set-delivery
+ * Seller sets the delivery window (in hours) and activates the escrow.
+ * This is when funds are deducted from the buyer's wallet and locked in escrow.
+ * The delivery countdown starts immediately.
+ */
+export const setDeliveryAndFund = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> => {
+  try {
+    const { delivery_hours } = req.body;
+
+    if (!delivery_hours || ![1, 2, 3, 6, 12, 24, 48, 72].includes(delivery_hours)) {
+      return res.status(400).json({
+        success: false,
+        message: 'delivery_hours must be one of: 1, 2, 3, 6, 12, 24, 48, 72',
+      });
+    }
+
+    const pool = db.getPool()!;
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(client, req.params.id);
+
+      if (!escrowTx) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+      }
+
+      if (escrowTx.receiver_id !== req.user!.id) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ success: false, message: 'Only the seller can set the delivery window' });
+      }
+
+      if (escrowTx.status !== 'initiated') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Cannot set delivery. Current status: ${escrowTx.status}`,
+        });
+      }
+
+      // Get buyer and seller wallets from metadata
+      const buyerWalletId = (escrowTx.metadata as any)?.sender_wallet_id;
+      const sellerWalletId = (escrowTx.metadata as any)?.receiver_wallet_id;
+
+      if (!buyerWalletId || !sellerWalletId) {
+        await client.query('ROLLBACK');
+        return res.status(500).json({ success: false, message: 'Wallet information not found' });
+      }
+
+      const price = parseFloat(escrowTx.amount);
+      const fee = parseFloat(escrowTx.fee);
+      const totalAmount = price + fee;
+
+      // Check buyer has sufficient balance (using client for transactional read)
+      const { rows: [buyerWallet] } = await client.query<Wallet>(
+        'SELECT * FROM wallets WHERE id = $1 FOR UPDATE',
+        [buyerWalletId]
+      );
+      if (!buyerWallet || parseFloat(buyerWallet.balance) < totalAmount) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Buyer has insufficient wallet balance to fund this escrow',
+        });
+      }
+
+      // Check spending limits
+      const limitCheck = await WalletModel.checkSpendingLimits(buyerWalletId, totalAmount.toString());
+      if (!limitCheck.allowed) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: limitCheck.reason });
+      }
+
+      // Reset spending if needed
+      await WalletModel.resetSpendingIfNeeded(client, buyerWalletId);
+
+      // Debit buyer's wallet
+      const balanceResult = await WalletModel.debitBalance(client, buyerWalletId, totalAmount.toString());
+
+      // Credit escrow balances for both parties (principal only)
+      await WalletModel.creditEscrow(client, buyerWalletId, escrowTx.amount);
+      await WalletModel.creditEscrow(client, sellerWalletId, escrowTx.amount);
+
+      // Record wallet transaction
+      await WalletTransactionModel.create(client, {
+        wallet_id: buyerWalletId,
+        type: 'escrow_lock',
+        amount: escrowTx.amount,
+        fee: escrowTx.fee,
+        balance_before: balanceResult.balance_before,
+        balance_after: balanceResult.balance_after,
+        status: 'completed',
+        reference: `${escrowTx.reference}_lock`,
+        escrow_transaction_id: escrowTx.id,
+        description: `Escrow payment for: ${escrowTx.item_description.substring(0, 100)}`,
+      });
+
+      // Calculate delivery deadline
+      const deliveryDeadline = new Date(Date.now() + delivery_hours * 60 * 60 * 1000);
+      const deliveryWindowLabel = delivery_hours >= 24
+        ? `${delivery_hours / 24} day${delivery_hours / 24 > 1 ? 's' : ''}`
+        : `${delivery_hours} hour${delivery_hours > 1 ? 's' : ''}`;
+
+      // Update status to funded with delivery info
+      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'funded', {
+        delivery_deadline: deliveryDeadline,
+        delivery_confirmed_at: new Date(),
+        delivery_window: `${delivery_hours} hours`,
+      });
+
+      await client.query('COMMIT');
+
+      await AuditLogModel.log({
+        user_id: req.user!.id,
+        action: 'escrow_funded_delivery_set',
+        entity_type: 'escrow_transaction',
+        entity_id: escrowTx.id,
+        details: {
+          delivery_hours,
+          delivery_deadline: deliveryDeadline.toISOString(),
+          price,
+          fee,
+          totalAmount,
+        },
+        ip_address: req.ip,
+        user_agent: req.headers['user-agent'],
+      });
+
+      // Emit socket event to buyer
+      socketService.emitToUser(escrowTx.user_id, 'escrow:funded', {
+        id: escrowTx.id,
+        delivery_deadline: deliveryDeadline,
+        delivery_hours,
+        message: `Seller has set a ${deliveryWindowLabel} delivery window. Funds are now locked in escrow.`,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `Delivery window set to ${deliveryWindowLabel}. Funds locked in escrow. Countdown started.`,
+        data: {
+          delivery_deadline: deliveryDeadline,
+          delivery_hours,
+          delivery_window: deliveryWindowLabel,
+          status: 'funded',
+        },
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
       if (err instanceof Error && err.message === 'Insufficient wallet balance') {
-        return res.status(400).json({ success: false, message: 'Insufficient wallet balance' });
+        return res.status(400).json({ success: false, message: 'Buyer has insufficient wallet balance' });
       }
       throw err;
     } finally {
@@ -172,7 +294,8 @@ export const initiateEscrow = async (
 
 /**
  * POST /api/v1/escrow/:id/confirm-delivery
- * Seller confirms they have delivered the item. Starts the confirmation countdown.
+ * Seller confirms they have delivered the item.
+ * Status transitions from 'funded' to 'delivery_confirmed'.
  */
 export const confirmDelivery = async (
   req: AuthenticatedRequest,
@@ -197,7 +320,7 @@ export const confirmDelivery = async (
         return res.status(403).json({ success: false, message: 'Only the seller can confirm delivery' });
       }
 
-      if (escrowTx.status !== 'funded' && escrowTx.status !== 'initiated') {
+      if (escrowTx.status !== 'funded') {
         await client.query('ROLLBACK');
         return res.status(400).json({
           success: false,
@@ -205,20 +328,14 @@ export const confirmDelivery = async (
         });
       }
 
-      // Set delivery deadline (1 hour from now)
-      const deliveryDeadline = new Date(Date.now() + 60 * 60 * 1000);
-
-      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'delivery_confirmed', {
-        delivery_confirmed_at: new Date(),
-        delivery_deadline: deliveryDeadline,
-      });
+      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'delivery_confirmed');
 
       await AuditLogModel.log({
         user_id: req.user!.id,
         action: 'delivery_confirmed',
         entity_type: 'escrow_transaction',
         entity_id: escrowTx.id,
-        details: { delivery_deadline: deliveryDeadline.toISOString() },
+        details: { delivery_deadline: escrowTx.delivery_deadline },
         ip_address: req.ip,
         user_agent: req.headers['user-agent'],
       });
@@ -228,14 +345,15 @@ export const confirmDelivery = async (
       // Emit socket event to buyer
       socketService.emitToUser(escrowTx.user_id, 'escrow:delivery_confirmed', {
         id: escrowTx.id,
-        delivery_deadline: deliveryDeadline,
+        delivery_deadline: escrowTx.delivery_deadline,
+        message: 'Seller has confirmed delivery. Please confirm receipt or raise a dispute.',
       });
 
       return res.status(200).json({
         success: true,
-        message: 'Delivery confirmed. Buyer has until the deadline to confirm receipt or raise a dispute.',
+        message: 'Delivery confirmed. Buyer can now confirm receipt or raise a dispute.',
         data: {
-          delivery_deadline: deliveryDeadline,
+          delivery_deadline: escrowTx.delivery_deadline,
         },
       });
     } catch (err) {
