@@ -1,6 +1,6 @@
-import { NextFunction, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import db from '../config/database';
+import { NextFunction, Response } from "express";
+import { v4 as uuidv4 } from "uuid";
+import db from "../config/database";
 import {
   AuditLogModel,
   DisputeModel,
@@ -8,11 +8,11 @@ import {
   UserModel,
   WalletModel,
   WalletTransactionModel,
-} from '../models';
-import cloudinaryService from '../services/cloudinaryService';
-import socketService from '../services/socketService';
+} from "../models";
+import cloudinaryService from "../services/cloudinaryService";
+import socketService from "../services/socketService";
 
-import { AuthenticatedRequest, Wallet } from '../types';
+import { AuthenticatedRequest, Wallet } from "../types";
 
 type WalletRequest = AuthenticatedRequest & { wallet?: Wallet };
 
@@ -25,7 +25,7 @@ type WalletRequest = AuthenticatedRequest & { wallet?: Wallet };
 export const initiateEscrow = async (
   req: WalletRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const { seller_email, item_description, item_photos, price } = req.body;
@@ -37,14 +37,14 @@ export const initiateEscrow = async (
     if (!seller) {
       return res.status(404).json({
         success: false,
-        message: 'Seller not found',
+        message: "Seller not found",
       });
     }
 
     if (seller.id === req.user!.id) {
       return res.status(400).json({
         success: false,
-        message: 'You cannot initiate an escrow with yourself',
+        message: "You cannot initiate an escrow with yourself",
       });
     }
 
@@ -52,7 +52,7 @@ export const initiateEscrow = async (
     if (!sellerWallet) {
       return res.status(400).json({
         success: false,
-        message: 'Seller does not have a wallet',
+        message: "Seller does not have a wallet",
       });
     }
 
@@ -63,7 +63,7 @@ export const initiateEscrow = async (
     const client = await pool.connect();
 
     try {
-      await client.query('BEGIN');
+      await client.query("BEGIN");
 
       // Create escrow transaction with status 'initiated' — no funds deducted yet
       const escrowTx = await EscrowTransactionModel.create(client, {
@@ -78,34 +78,41 @@ export const initiateEscrow = async (
         fee: fee.toString(),
       });
 
-      await client.query('COMMIT');
+      await client.query("COMMIT");
 
       await AuditLogModel.log({
         user_id: req.user!.id,
-        action: 'escrow_initiated',
-        entity_type: 'escrow_transaction',
+        action: "escrow_initiated",
+        entity_type: "escrow_transaction",
         entity_id: escrowTx.id,
         details: { price, fee, seller_id: seller.id, reference },
         ip_address: req.ip,
-        user_agent: req.headers['user-agent'],
+        user_agent: req.headers["user-agent"],
       });
 
       // Emit socket event to seller
-      socketService.emitToUser(seller.id, 'escrow:initiated', {
+      socketService.emitToUser(seller.id, "escrow:initiated", {
         id: escrowTx.id,
         reference: escrowTx.reference,
         buyer_name: req.user!.name,
         price,
         item_description,
       });
+      socketService.emitToUser(seller.id, "transaction:updated", {
+        id: escrowTx.id,
+      });
+      socketService.emitToUser(req.user!.id, "transaction:updated", {
+        id: escrowTx.id,
+      });
 
       return res.status(201).json({
         success: true,
-        message: 'Escrow transaction initiated. Awaiting seller to set delivery window.',
+        message:
+          "Escrow transaction initiated. Awaiting seller to set delivery window.",
         data: {
           id: escrowTx.id,
           reference: escrowTx.reference,
-          status: 'initiated',
+          status: "initiated",
           price,
           fee,
           seller_email,
@@ -115,7 +122,7 @@ export const initiateEscrow = async (
         },
       });
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw err;
     } finally {
       client.release();
@@ -134,15 +141,18 @@ export const initiateEscrow = async (
 export const setDeliveryAndFund = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const { delivery_hours } = req.body;
 
-    if (!delivery_hours || ![1, 2, 3, 6, 12, 24, 48, 72].includes(delivery_hours)) {
+    if (
+      !delivery_hours ||
+      ![1, 2, 3, 6, 12, 24, 48, 72].includes(delivery_hours)
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'delivery_hours must be one of: 1, 2, 3, 6, 12, 24, 48, 72',
+        message: "delivery_hours must be one of: 1, 2, 3, 6, 12, 24, 48, 72",
       });
     }
 
@@ -150,22 +160,30 @@ export const setDeliveryAndFund = async (
     const client = await pool.connect();
 
     try {
-      await client.query('BEGIN');
+      await client.query("BEGIN");
 
-      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(client, req.params.id);
+      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(
+        client,
+        req.params.id,
+      );
 
       if (!escrowTx) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+        await client.query("ROLLBACK");
+        return res
+          .status(404)
+          .json({ success: false, message: "Escrow transaction not found" });
       }
 
       if (escrowTx.receiver_id !== req.user!.id) {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ success: false, message: 'Only the seller can set the delivery window' });
+        await client.query("ROLLBACK");
+        return res.status(403).json({
+          success: false,
+          message: "Only the seller can set the delivery window",
+        });
       }
 
-      if (escrowTx.status !== 'initiated') {
-        await client.query('ROLLBACK');
+      if (escrowTx.status !== "initiated") {
+        await client.query("ROLLBACK");
         return res.status(400).json({
           success: false,
           message: `Cannot set delivery. Current status: ${escrowTx.status}`,
@@ -177,8 +195,10 @@ export const setDeliveryAndFund = async (
       const sellerWalletId = (escrowTx.metadata as any)?.receiver_wallet_id;
 
       if (!buyerWalletId || !sellerWalletId) {
-        await client.query('ROLLBACK');
-        return res.status(500).json({ success: false, message: 'Wallet information not found' });
+        await client.query("ROLLBACK");
+        return res
+          .status(500)
+          .json({ success: false, message: "Wallet information not found" });
       }
 
       const price = parseFloat(escrowTx.amount);
@@ -186,30 +206,48 @@ export const setDeliveryAndFund = async (
       const totalAmount = price + fee;
 
       // Check buyer has sufficient balance (using client for transactional read)
-      const { rows: [buyerWallet] } = await client.query<Wallet>(
-        'SELECT * FROM wallets WHERE id = $1 FOR UPDATE',
-        [buyerWalletId]
+      const {
+        rows: [buyerWallet],
+      } = await client.query<Wallet>(
+        "SELECT * FROM wallets WHERE id = $1 FOR UPDATE",
+        [buyerWalletId],
+      );
+
+      console.log(
+        "Buyer wallet balance:",
+        buyerWallet?.balance,
+        "Total amount:",
+        totalAmount,
       );
       if (!buyerWallet || parseFloat(buyerWallet.balance) < totalAmount) {
-        await client.query('ROLLBACK');
+        await client.query("ROLLBACK");
         return res.status(400).json({
           success: false,
-          message: 'Buyer has insufficient wallet balance to fund this escrow',
+          message: "Buyer has insufficient wallet balance to fund this escrow",
         });
       }
 
       // Check spending limits
-      const limitCheck = await WalletModel.checkSpendingLimits(buyerWalletId, totalAmount.toString());
+      const limitCheck = await WalletModel.checkSpendingLimits(
+        buyerWalletId,
+        totalAmount.toString(),
+      );
       if (!limitCheck.allowed) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ success: false, message: limitCheck.reason });
+        await client.query("ROLLBACK");
+        return res
+          .status(400)
+          .json({ success: false, message: limitCheck.reason });
       }
 
       // Reset spending if needed
       await WalletModel.resetSpendingIfNeeded(client, buyerWalletId);
 
       // Debit buyer's wallet
-      const balanceResult = await WalletModel.debitBalance(client, buyerWalletId, totalAmount.toString());
+      const balanceResult = await WalletModel.debitBalance(
+        client,
+        buyerWalletId,
+        totalAmount.toString(),
+      );
 
       // Credit escrow balances for both parties (principal only)
       await WalletModel.creditEscrow(client, buyerWalletId, escrowTx.amount);
@@ -218,36 +256,39 @@ export const setDeliveryAndFund = async (
       // Record wallet transaction
       await WalletTransactionModel.create(client, {
         wallet_id: buyerWalletId,
-        type: 'escrow_lock',
+        type: "escrow_lock",
         amount: escrowTx.amount,
         fee: escrowTx.fee,
         balance_before: balanceResult.balance_before,
         balance_after: balanceResult.balance_after,
-        status: 'completed',
+        status: "completed",
         reference: `${escrowTx.reference}_lock`,
         escrow_transaction_id: escrowTx.id,
         description: `Escrow payment for: ${escrowTx.item_description.substring(0, 100)}`,
       });
 
       // Calculate delivery deadline
-      const deliveryDeadline = new Date(Date.now() + delivery_hours * 60 * 60 * 1000);
-      const deliveryWindowLabel = delivery_hours >= 24
-        ? `${delivery_hours / 24} day${delivery_hours / 24 > 1 ? 's' : ''}`
-        : `${delivery_hours} hour${delivery_hours > 1 ? 's' : ''}`;
+      const deliveryDeadline = new Date(
+        Date.now() + delivery_hours * 60 * 60 * 1000,
+      );
+      const deliveryWindowLabel =
+        delivery_hours >= 24
+          ? `${delivery_hours / 24} day${delivery_hours / 24 > 1 ? "s" : ""}`
+          : `${delivery_hours} hour${delivery_hours > 1 ? "s" : ""}`;
 
       // Update status to funded with delivery info
-      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'funded', {
+      await EscrowTransactionModel.updateStatus(client, escrowTx.id, "funded", {
         delivery_deadline: deliveryDeadline,
         delivery_confirmed_at: new Date(),
         delivery_window: `${delivery_hours} hours`,
       });
 
-      await client.query('COMMIT');
+      await client.query("COMMIT");
 
       await AuditLogModel.log({
         user_id: req.user!.id,
-        action: 'escrow_funded_delivery_set',
-        entity_type: 'escrow_transaction',
+        action: "escrow_funded_delivery_set",
+        entity_type: "escrow_transaction",
         entity_id: escrowTx.id,
         details: {
           delivery_hours,
@@ -257,15 +298,19 @@ export const setDeliveryAndFund = async (
           totalAmount,
         },
         ip_address: req.ip,
-        user_agent: req.headers['user-agent'],
+        user_agent: req.headers["user-agent"],
       });
 
-      // Emit socket event to buyer
-      socketService.emitToUser(escrowTx.user_id, 'escrow:funded', {
+      // Emit socket event to buyer — escrow funded, wallet deducted
+      socketService.emitToUser(escrowTx.user_id, "escrow:funded", {
         id: escrowTx.id,
         delivery_deadline: deliveryDeadline,
         delivery_hours,
         message: `Seller has set a ${deliveryWindowLabel} delivery window. Funds are now locked in escrow.`,
+      });
+      socketService.emitToUser(escrowTx.user_id, "wallet:updated", {});
+      socketService.emitToUser(escrowTx.user_id, "transaction:updated", {
+        id: escrowTx.id,
       });
 
       return res.status(200).json({
@@ -275,13 +320,19 @@ export const setDeliveryAndFund = async (
           delivery_deadline: deliveryDeadline,
           delivery_hours,
           delivery_window: deliveryWindowLabel,
-          status: 'funded',
+          status: "funded",
         },
       });
     } catch (err) {
-      await client.query('ROLLBACK');
-      if (err instanceof Error && err.message === 'Insufficient wallet balance') {
-        return res.status(400).json({ success: false, message: 'Buyer has insufficient wallet balance' });
+      await client.query("ROLLBACK");
+      if (
+        err instanceof Error &&
+        err.message === "Insufficient wallet balance"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Buyer has insufficient wallet balance",
+        });
       }
       throw err;
     } finally {
@@ -300,64 +351,82 @@ export const setDeliveryAndFund = async (
 export const confirmDelivery = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const pool = db.getPool()!;
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
+      await client.query("BEGIN");
 
-      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(client, req.params.id);
+      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(
+        client,
+        req.params.id,
+      );
 
       if (!escrowTx) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+        await client.query("ROLLBACK");
+        return res
+          .status(404)
+          .json({ success: false, message: "Escrow transaction not found" });
       }
 
       if (escrowTx.receiver_id !== req.user!.id) {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ success: false, message: 'Only the seller can confirm delivery' });
+        await client.query("ROLLBACK");
+        return res.status(403).json({
+          success: false,
+          message: "Only the seller can confirm delivery",
+        });
       }
 
-      if (escrowTx.status !== 'funded') {
-        await client.query('ROLLBACK');
+      if (escrowTx.status !== "funded") {
+        await client.query("ROLLBACK");
         return res.status(400).json({
           success: false,
           message: `Cannot confirm delivery. Current status: ${escrowTx.status}`,
         });
       }
 
-      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'delivery_confirmed');
+      await EscrowTransactionModel.updateStatus(
+        client,
+        escrowTx.id,
+        "delivery_confirmed",
+      );
 
       await AuditLogModel.log({
         user_id: req.user!.id,
-        action: 'delivery_confirmed',
-        entity_type: 'escrow_transaction',
+        action: "delivery_confirmed",
+        entity_type: "escrow_transaction",
         entity_id: escrowTx.id,
         details: { delivery_deadline: escrowTx.delivery_deadline },
         ip_address: req.ip,
-        user_agent: req.headers['user-agent'],
+        user_agent: req.headers["user-agent"],
       });
 
-      await client.query('COMMIT');
-
-      // Emit socket event to buyer
-      socketService.emitToUser(escrowTx.user_id, 'escrow:delivery_confirmed', {
+      await client.query("COMMIT");
+      socketService.emitToUser(escrowTx.user_id, "escrow:delivery_confirmed", {
         id: escrowTx.id,
         delivery_deadline: escrowTx.delivery_deadline,
-        message: 'Seller has confirmed delivery. Please confirm receipt or raise a dispute.',
+        message:
+          "Seller has confirmed delivery. Please confirm receipt or raise a dispute.",
+      });
+      socketService.emitToUser(escrowTx.user_id, "transaction:updated", {
+        id: escrowTx.id,
+      });
+      socketService.emitToUser(escrowTx.receiver_id!, "transaction:updated", {
+        id: escrowTx.id,
       });
 
       return res.status(200).json({
         success: true,
-        message: 'Delivery confirmed. Buyer can now confirm receipt or raise a dispute.',
+        message:
+          "Delivery confirmed. Buyer can now confirm receipt or raise a dispute.",
         data: {
           delivery_deadline: escrowTx.delivery_deadline,
         },
       });
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw err;
     } finally {
       client.release();
@@ -374,29 +443,37 @@ export const confirmDelivery = async (
 export const confirmReceipt = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const pool = db.getPool()!;
     const client = await pool.connect();
 
     try {
-      await client.query('BEGIN');
+      await client.query("BEGIN");
 
-      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(client, req.params.id);
+      const escrowTx = await EscrowTransactionModel.findByIdForUpdate(
+        client,
+        req.params.id,
+      );
 
       if (!escrowTx) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+        await client.query("ROLLBACK");
+        return res
+          .status(404)
+          .json({ success: false, message: "Escrow transaction not found" });
       }
 
       if (escrowTx.user_id !== req.user!.id) {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ success: false, message: 'Only the buyer can confirm receipt' });
+        await client.query("ROLLBACK");
+        return res.status(403).json({
+          success: false,
+          message: "Only the buyer can confirm receipt",
+        });
       }
 
-      if (escrowTx.status !== 'delivery_confirmed') {
-        await client.query('ROLLBACK');
+      if (escrowTx.status !== "delivery_confirmed") {
+        await client.query("ROLLBACK");
         return res.status(400).json({
           success: false,
           message: `Cannot confirm receipt. Current status: ${escrowTx.status}`,
@@ -408,28 +485,33 @@ export const confirmReceipt = async (
       // Credit seller's wallet
       const sellerWalletId = (escrowTx.metadata as any)?.receiver_wallet_id;
       if (!sellerWalletId) {
-        throw new Error('Seller wallet ID not found in metadata');
+        throw new Error("Seller wallet ID not found in metadata");
       }
 
       const balanceResult = await WalletModel.creditBalance(
         client,
         sellerWalletId,
-        escrowTx.amount
+        escrowTx.amount,
       );
 
       // Update escrow status
-      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'completed', {
-        buyer_confirmed_at: new Date(),
-      });
+      await EscrowTransactionModel.updateStatus(
+        client,
+        escrowTx.id,
+        "completed",
+        {
+          buyer_confirmed_at: new Date(),
+        },
+      );
 
       // Record wallet transaction (escrow release to seller)
       await WalletTransactionModel.create(client, {
         wallet_id: sellerWalletId,
-        type: 'escrow_release',
+        type: "escrow_release",
         amount: escrowTx.amount,
         balance_before: balanceResult.balance_before,
         balance_after: balanceResult.balance_after,
-        status: 'completed',
+        status: "completed",
         reference: releaseReference,
         escrow_transaction_id: escrowTx.id,
         description: `Escrow release: ${escrowTx.item_description.substring(0, 100)}`,
@@ -444,32 +526,40 @@ export const confirmReceipt = async (
 
       await AuditLogModel.log({
         user_id: req.user!.id,
-        action: 'receipt_confirmed',
-        entity_type: 'escrow_transaction',
+        action: "receipt_confirmed",
+        entity_type: "escrow_transaction",
         entity_id: escrowTx.id,
         details: { price: escrowTx.amount, seller_id: escrowTx.receiver_id },
         ip_address: req.ip,
-        user_agent: req.headers['user-agent'],
+        user_agent: req.headers["user-agent"],
       });
 
-      await client.query('COMMIT');
+      await client.query("COMMIT");
 
-      // Emit socket events to both parties
-      socketService.emitToUser(escrowTx.receiver_id, 'escrow:completed', {
+      // Emit socket events to both parties — funds released, wallets updated
+      socketService.emitToUser(escrowTx.receiver_id, "escrow:completed", {
         id: escrowTx.id,
-        message: 'Funds released to your wallet',
+        message: "Funds released to your wallet",
       });
-      socketService.emitToUser(escrowTx.user_id, 'escrow:completed', {
+      socketService.emitToUser(escrowTx.user_id, "escrow:completed", {
         id: escrowTx.id,
-        message: 'Transaction completed successfully',
+        message: "Transaction completed successfully",
+      });
+      socketService.emitToUser(escrowTx.receiver_id, "wallet:updated", {});
+      socketService.emitToUser(escrowTx.user_id, "wallet:updated", {});
+      socketService.emitToUser(escrowTx.receiver_id, "transaction:updated", {
+        id: escrowTx.id,
+      });
+      socketService.emitToUser(escrowTx.user_id, "transaction:updated", {
+        id: escrowTx.id,
       });
 
       return res.status(200).json({
         success: true,
-        message: 'Receipt confirmed. Funds released to seller.',
+        message: "Receipt confirmed. Funds released to seller.",
       });
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw err;
     } finally {
       client.release();
@@ -486,21 +576,26 @@ export const confirmReceipt = async (
 export const raiseDispute = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const { reason, evidence_photos } = req.body;
     const escrowTx = await EscrowTransactionModel.findById(req.params.id);
 
     if (!escrowTx) {
-      return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Escrow transaction not found" });
     }
 
     if (escrowTx.user_id !== req.user!.id) {
-      return res.status(403).json({ success: false, message: 'Only the buyer can raise a dispute' });
+      return res.status(403).json({
+        success: false,
+        message: "Only the buyer can raise a dispute",
+      });
     }
 
-    const disputeAllowedStatuses = ['funded', 'delivery_confirmed'];
+    const disputeAllowedStatuses = ["funded", "delivery_confirmed"];
     if (!disputeAllowedStatuses.includes(escrowTx.status)) {
       return res.status(400).json({
         success: false,
@@ -510,10 +605,13 @@ export const raiseDispute = async (
 
     // Check if dispute already exists
     const existingDispute = await DisputeModel.findByEscrowId(escrowTx.id);
-    if (existingDispute && ['open', 'under_review'].includes(existingDispute.status)) {
+    if (
+      existingDispute &&
+      ["open", "under_review"].includes(existingDispute.status)
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'A dispute is already open for this transaction',
+        message: "A dispute is already open for this transaction",
       });
     }
 
@@ -521,7 +619,7 @@ export const raiseDispute = async (
     const client = await pool.connect();
 
     try {
-      await client.query('BEGIN');
+      await client.query("BEGIN");
 
       const dispute = await DisputeModel.create(client, {
         escrow_transaction_id: escrowTx.id,
@@ -530,13 +628,20 @@ export const raiseDispute = async (
         evidence_photos: evidence_photos || [],
       });
 
-      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'disputed');
+      await EscrowTransactionModel.updateStatus(
+        client,
+        escrowTx.id,
+        "disputed",
+      );
 
-      await client.query('COMMIT');
+      await client.query("COMMIT");
 
       // Notify the other party about the dispute
-      const otherUserId = req.user!.id === escrowTx.user_id ? escrowTx.receiver_id : escrowTx.user_id;
-      socketService.emitToUser(otherUserId, 'escrow:disputed', {
+      const otherUserId =
+        req.user!.id === escrowTx.user_id
+          ? escrowTx.receiver_id
+          : escrowTx.user_id;
+      socketService.emitToUser(otherUserId, "escrow:disputed", {
         id: escrowTx.id,
         reason,
         raised_by: req.user!.name,
@@ -544,24 +649,24 @@ export const raiseDispute = async (
 
       await AuditLogModel.log({
         user_id: req.user!.id,
-        action: 'dispute_raised',
-        entity_type: 'dispute',
+        action: "dispute_raised",
+        entity_type: "dispute",
         entity_id: dispute.id,
         details: { escrow_id: escrowTx.id, reason },
         ip_address: req.ip,
-        user_agent: req.headers['user-agent'],
+        user_agent: req.headers["user-agent"],
       });
 
       return res.status(201).json({
         success: true,
-        message: 'Dispute raised successfully. An admin will review your case.',
+        message: "Dispute raised successfully. An admin will review your case.",
         data: {
           dispute_id: dispute.id,
           status: dispute.status,
         },
       });
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw err;
     } finally {
       client.release();
@@ -578,20 +683,24 @@ export const raiseDispute = async (
 export const cancelEscrow = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const escrowTx = await EscrowTransactionModel.findById(req.params.id);
 
     if (!escrowTx) {
-      return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Escrow transaction not found" });
     }
 
     if (escrowTx.user_id !== req.user!.id) {
-      return res.status(403).json({ success: false, message: 'Only the buyer can cancel' });
+      return res
+        .status(403)
+        .json({ success: false, message: "Only the buyer can cancel" });
     }
 
-    if (escrowTx.status !== 'initiated') {
+    if (escrowTx.status !== "initiated") {
       return res.status(400).json({
         success: false,
         message: `Cannot cancel. Current status: ${escrowTx.status}. Funds are already locked.`,
@@ -601,18 +710,28 @@ export const cancelEscrow = async (
     const pool = db.getPool()!;
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-      await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'cancelled');
-      await client.query('COMMIT');
+      await client.query("BEGIN");
+      await EscrowTransactionModel.updateStatus(
+        client,
+        escrowTx.id,
+        "cancelled",
+      );
+      await client.query("COMMIT");
 
       // Notify seller that the escrow was cancelled
-      socketService.emitToUser(escrowTx.receiver_id, 'escrow:cancelled', {
+      socketService.emitToUser(escrowTx.receiver_id, "escrow:cancelled", {
         id: escrowTx.id,
         reference: escrowTx.reference,
-        message: 'The buyer has cancelled the escrow transaction.',
+        message: "The buyer has cancelled the escrow transaction.",
+      });
+      socketService.emitToUser(escrowTx.receiver_id, "transaction:updated", {
+        id: escrowTx.id,
+      });
+      socketService.emitToUser(escrowTx.user_id, "transaction:updated", {
+        id: escrowTx.id,
       });
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw err;
     } finally {
       client.release();
@@ -620,7 +739,7 @@ export const cancelEscrow = async (
 
     return res.status(200).json({
       success: true,
-      message: 'Escrow transaction cancelled',
+      message: "Escrow transaction cancelled",
     });
   } catch (err) {
     next(err);
@@ -634,7 +753,7 @@ export const cancelEscrow = async (
 export const getEscrowTransactions = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -642,7 +761,7 @@ export const getEscrowTransactions = async (
     const offset = (page - 1) * limit;
 
     const result = await EscrowTransactionModel.findByUserId(req.user!.id, {
-      role: req.query.role as 'buyer' | 'seller' | undefined,
+      role: req.query.role as "buyer" | "seller" | undefined,
       status: req.query.status as any,
       limit,
       offset,
@@ -672,18 +791,23 @@ export const getEscrowTransactions = async (
 export const getEscrowById = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const escrowTx = await EscrowTransactionModel.findById(req.params.id);
 
     if (!escrowTx) {
-      return res.status(404).json({ success: false, message: 'Escrow transaction not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Escrow transaction not found" });
     }
 
     // Only buyer or seller can view
-    if (escrowTx.user_id !== req.user!.id && escrowTx.receiver_id !== req.user!.id) {
-      return res.status(403).json({ success: false, message: 'Access denied' });
+    if (
+      escrowTx.user_id !== req.user!.id &&
+      escrowTx.receiver_id !== req.user!.id
+    ) {
+      return res.status(403).json({ success: false, message: "Access denied" });
     }
 
     // Get associated dispute if any
@@ -708,88 +832,115 @@ export const getEscrowById = async (
 export const resolveDispute = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const { resolution, admin_notes } = req.body;
     const dispute = await DisputeModel.findById(req.params.id);
 
     if (!dispute) {
-      return res.status(404).json({ success: false, message: 'Dispute not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Dispute not found" });
     }
 
-    if (!['open', 'under_review'].includes(dispute.status)) {
+    if (!["open", "under_review"].includes(dispute.status)) {
       return res.status(400).json({
         success: false,
         message: `Dispute already resolved with status: ${dispute.status}`,
       });
     }
 
-    const escrowTx = await EscrowTransactionModel.findById(dispute.escrow_transaction_id);
+    const escrowTx = await EscrowTransactionModel.findById(
+      dispute.escrow_transaction_id,
+    );
     if (!escrowTx) {
-      return res.status(500).json({ success: false, message: 'Associated escrow transaction not found' });
+      return res.status(500).json({
+        success: false,
+        message: "Associated escrow transaction not found",
+      });
     }
 
     const pool = db.getPool()!;
     const client = await pool.connect();
 
     try {
-      await client.query('BEGIN');
+      await client.query("BEGIN");
 
-      if (resolution === 'refund') {
+      if (resolution === "refund") {
         // Refund buyer
         const buyerWalletId = (escrowTx.metadata as any)?.sender_wallet_id;
         if (!buyerWalletId) {
-          throw new Error('Buyer wallet ID not found in metadata');
+          throw new Error("Buyer wallet ID not found in metadata");
         }
 
         const balanceResult = await WalletModel.creditBalance(
           client,
           buyerWalletId,
-          escrowTx.amount
+          escrowTx.amount,
         );
 
         await WalletTransactionModel.create(client, {
           wallet_id: buyerWalletId,
-          type: 'escrow_refund',
+          type: "escrow_refund",
           amount: escrowTx.amount,
           balance_before: balanceResult.balance_before,
           balance_after: balanceResult.balance_after,
-          status: 'completed',
+          status: "completed",
           reference: `${escrowTx.reference}_refund`,
           escrow_transaction_id: escrowTx.id,
-          description: 'Escrow refund — dispute resolved in buyer\'s favor',
+          description: "Escrow refund — dispute resolved in buyer's favor",
         });
 
-        await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'refunded');
-        await DisputeModel.updateStatus(client, dispute.id, 'resolved_refund', req.user!.id, admin_notes);
+        await EscrowTransactionModel.updateStatus(
+          client,
+          escrowTx.id,
+          "refunded",
+        );
+        await DisputeModel.updateStatus(
+          client,
+          dispute.id,
+          "resolved_refund",
+          req.user!.id,
+          admin_notes,
+        );
       } else {
         // Release to seller
         const sellerWalletId = (escrowTx.metadata as any)?.receiver_wallet_id;
         if (!sellerWalletId) {
-          throw new Error('Seller wallet ID not found in metadata');
+          throw new Error("Seller wallet ID not found in metadata");
         }
 
         const balanceResult = await WalletModel.creditBalance(
           client,
           sellerWalletId,
-          escrowTx.amount
+          escrowTx.amount,
         );
 
         await WalletTransactionModel.create(client, {
           wallet_id: sellerWalletId,
-          type: 'escrow_release',
+          type: "escrow_release",
           amount: escrowTx.amount,
           balance_before: balanceResult.balance_before,
           balance_after: balanceResult.balance_after,
-          status: 'completed',
+          status: "completed",
           reference: `${escrowTx.reference}_release`,
           escrow_transaction_id: escrowTx.id,
-          description: 'Escrow release — dispute resolved in seller\'s favor',
+          description: "Escrow release — dispute resolved in seller's favor",
         });
 
-        await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'completed');
-        await DisputeModel.updateStatus(client, dispute.id, 'resolved_release', req.user!.id, admin_notes);
+        await EscrowTransactionModel.updateStatus(
+          client,
+          escrowTx.id,
+          "completed",
+        );
+        await DisputeModel.updateStatus(
+          client,
+          dispute.id,
+          "resolved_release",
+          req.user!.id,
+          admin_notes,
+        );
       }
 
       // Update escrow balances (reduce for both regardless of resolution - principal only)
@@ -803,24 +954,36 @@ export const resolveDispute = async (
         await WalletModel.debitEscrow(client, sellerWalletId, escrowTx.amount);
       }
 
-      await client.query('COMMIT');
+      await client.query("COMMIT");
 
-      // Notify both parties about the resolution
-      socketService.emitToUser(escrowTx.user_id, 'escrow:dispute_resolved', {
+      // Notify both parties about the resolution — wallets updated
+      socketService.emitToUser(escrowTx.user_id, "escrow:dispute_resolved", {
         id: escrowTx.id,
         resolution,
-        message: `Dispute resolved. Funds ${resolution === 'refund' ? 'refunded to you' : 'released to seller'}.`,
+        message: `Dispute resolved. Funds ${resolution === "refund" ? "refunded to you" : "released to seller"}.`,
       });
-      socketService.emitToUser(escrowTx.receiver_id, 'escrow:dispute_resolved', {
+      socketService.emitToUser(
+        escrowTx.receiver_id,
+        "escrow:dispute_resolved",
+        {
+          id: escrowTx.id,
+          resolution,
+          message: `Dispute resolved. Funds ${resolution === "refund" ? "refunded to buyer" : "released to you"}.`,
+        },
+      );
+      socketService.emitToUser(escrowTx.user_id, "wallet:updated", {});
+      socketService.emitToUser(escrowTx.receiver_id, "wallet:updated", {});
+      socketService.emitToUser(escrowTx.user_id, "transaction:updated", {
         id: escrowTx.id,
-        resolution,
-        message: `Dispute resolved. Funds ${resolution === 'refund' ? 'refunded to buyer' : 'released to you'}.`,
+      });
+      socketService.emitToUser(escrowTx.receiver_id, "transaction:updated", {
+        id: escrowTx.id,
       });
 
       await AuditLogModel.log({
         user_id: req.user!.id,
         action: `dispute_resolved_${resolution}`,
-        entity_type: 'dispute',
+        entity_type: "dispute",
         entity_id: dispute.id,
         details: {
           escrow_id: escrowTx.id,
@@ -829,15 +992,15 @@ export const resolveDispute = async (
           amount: escrowTx.amount,
         },
         ip_address: req.ip,
-        user_agent: req.headers['user-agent'],
+        user_agent: req.headers["user-agent"],
       });
 
       return res.status(200).json({
         success: true,
-        message: `Dispute resolved. Funds ${resolution === 'refund' ? 'refunded to buyer' : 'released to seller'}.`,
+        message: `Dispute resolved. Funds ${resolution === "refund" ? "refunded to buyer" : "released to seller"}.`,
       });
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw err;
     } finally {
       client.release();
@@ -854,7 +1017,7 @@ export const resolveDispute = async (
 export const getDisputes = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -891,7 +1054,7 @@ export const getDisputes = async (
 export const uploadItemImages = async (
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void | Response> => {
   try {
     const { images } = req.body; // Array of base64 strings
@@ -899,19 +1062,19 @@ export const uploadItemImages = async (
     if (!images || !Array.isArray(images) || images.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'No images provided',
+        message: "No images provided",
       });
     }
 
     if (images.length > 5) {
       return res.status(400).json({
         success: false,
-        message: 'Maximum 5 images allowed',
+        message: "Maximum 5 images allowed",
       });
     }
 
     const uploadPromises = images.map((image) =>
-      cloudinaryService.uploadImage(image, 'escrow_items')
+      cloudinaryService.uploadImage(image, "escrow_items"),
     );
 
     const results = await Promise.all(uploadPromises);
@@ -919,7 +1082,7 @@ export const uploadItemImages = async (
 
     return res.status(200).json({
       success: true,
-      message: 'Images uploaded successfully',
+      message: "Images uploaded successfully",
       data: {
         urls: imageUrls,
       },

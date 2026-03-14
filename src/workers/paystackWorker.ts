@@ -1,15 +1,16 @@
 import { Worker, Job } from 'bullmq';
 import { redisConnection } from '../config/redis';
 import db from '../config/database';
-import { 
-  WalletModel, 
-  WalletTransactionModel, 
-  AuditLogModel, 
-  TransactionModel, 
-  PaymentMethodModel 
+import {
+  WalletModel,
+  WalletTransactionModel,
+  AuditLogModel,
+  TransactionModel,
+  PaymentMethodModel
 } from '../models';
 import { paystackService } from '../services/paystackService';
 import { PaystackWebhookEvent } from '../types';
+import socketService from '../services/socketService';
 
 export const setupPaystackWorker = () => {
   const worker = new Worker(
@@ -49,6 +50,14 @@ export const setupPaystackWorker = () => {
   return worker;
 };
 
+async function getWalletOwner(walletId: string): Promise<string | null> {
+  const { rows } = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM wallets WHERE id = $1`,
+    [walletId]
+  );
+  return rows[0]?.user_id ?? null;
+}
+
 async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
   const { reference, amount, authorization, metadata } = event.data;
 
@@ -82,6 +91,13 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
 
         if (authorization?.reusable && metadata?.wallet_id) {
           await saveCardAuthorization(metadata.wallet_id as string, authorization);
+        }
+
+        // Notify user of wallet update
+        const walletOwner = await getWalletOwner(walletTx.wallet_id);
+        if (walletOwner) {
+          socketService.emitToUser(walletOwner, 'wallet:updated', { wallet_id: walletTx.wallet_id });
+          socketService.emitToUser(walletOwner, 'transaction:updated', { type: 'deposit' });
         }
 
         await AuditLogModel.log({
@@ -127,6 +143,10 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
           await saveCardAuthorization(walletId, authorization);
         }
 
+        // Notify user of deposit completion
+        socketService.emitToUser(transaction.user_id, 'wallet:updated', { wallet_id: walletId });
+        socketService.emitToUser(transaction.user_id, 'transaction:updated', { id: transaction.id, type: 'deposit', status: 'completed' });
+
         await AuditLogModel.log({
           action: 'deposit_completed',
           entity_type: 'transaction',
@@ -158,6 +178,12 @@ async function handleTransferSuccess(event: PaystackWebhookEvent): Promise<void>
       await WalletTransactionModel.updateStatus(client, walletTx.id, 'completed');
       await client.query('COMMIT');
 
+      const walletOwner = await getWalletOwner(walletTx.wallet_id);
+      if (walletOwner) {
+        socketService.emitToUser(walletOwner, 'wallet:updated', { wallet_id: walletTx.wallet_id });
+        socketService.emitToUser(walletOwner, 'transaction:updated', { type: 'withdrawal', status: 'completed' });
+      }
+
       await AuditLogModel.log({
         action: 'withdrawal_completed',
         entity_type: 'wallet',
@@ -182,6 +208,9 @@ async function handleTransferSuccess(event: PaystackWebhookEvent): Promise<void>
       await client.query('BEGIN');
       await TransactionModel.updateStatus(client, transaction.id, 'completed');
       await client.query('COMMIT');
+
+      socketService.emitToUser(transaction.user_id, 'wallet:updated', { wallet_id: (transaction.metadata as any)?.wallet_id });
+      socketService.emitToUser(transaction.user_id, 'transaction:updated', { id: transaction.id, type: 'withdrawal', status: 'completed' });
 
       await AuditLogModel.log({
         action: 'withdrawal_completed',
@@ -212,6 +241,12 @@ async function handleTransferFailed(event: PaystackWebhookEvent): Promise<void> 
       await WalletTransactionModel.updateStatus(client, walletTx.id, 'failed');
       await client.query('COMMIT');
 
+      const walletOwner = await getWalletOwner(walletTx.wallet_id);
+      if (walletOwner) {
+        socketService.emitToUser(walletOwner, 'wallet:updated', { wallet_id: walletTx.wallet_id });
+        socketService.emitToUser(walletOwner, 'transaction:updated', { type: 'withdrawal', status: 'failed' });
+      }
+
       await AuditLogModel.log({
         action: 'withdrawal_failed_reversed',
         entity_type: 'wallet',
@@ -240,6 +275,9 @@ async function handleTransferFailed(event: PaystackWebhookEvent): Promise<void> 
       await WalletModel.creditBalance(client, walletId, transaction.amount);
       await TransactionModel.updateStatus(client, transaction.id, 'failed');
       await client.query('COMMIT');
+
+      socketService.emitToUser(transaction.user_id, 'wallet:updated', { wallet_id: walletId });
+      socketService.emitToUser(transaction.user_id, 'transaction:updated', { id: transaction.id, type: 'withdrawal', status: 'failed' });
 
       await AuditLogModel.log({
         action: 'withdrawal_failed_reversed',

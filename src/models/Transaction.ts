@@ -51,7 +51,11 @@ export const TransactionModel = {
 
   async findById(id: string): Promise<Transaction | null> {
     const { rows } = await db.query<Transaction>(
-      `SELECT t.*, u_sender.name as sender_name, u_receiver.name as receiver_name
+      `SELECT t.*,
+              u_sender.name as sender_name,
+              u_sender.profile_photo as sender_photo,
+              u_receiver.name as receiver_name,
+              u_receiver.profile_photo as receiver_photo
        FROM transactions t
        LEFT JOIN users u_sender ON t.user_id = u_sender.id
        LEFT JOIN users u_receiver ON t.receiver_id = u_receiver.id
@@ -174,7 +178,11 @@ export const TransactionModel = {
 
     const dataValues = [...values, limit, offset];
     const { rows } = await db.query<Transaction>(
-      `SELECT t.*, u_sender.name as sender_name, u_receiver.name as receiver_name
+      `SELECT t.*,
+              u_sender.name as sender_name,
+              u_sender.profile_photo as sender_photo,
+              u_receiver.name as receiver_name,
+              u_receiver.profile_photo as receiver_photo
        FROM transactions t
        LEFT JOIN users u_sender ON t.user_id = u_sender.id
        LEFT JOIN users u_receiver ON t.receiver_id = u_receiver.id
