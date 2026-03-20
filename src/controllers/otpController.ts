@@ -1,22 +1,22 @@
-import { Request, Response } from 'express';
-import { validationResult } from 'express-validator';
-import otpModel from '../models/otpModel';
-import { sendEmail } from '../services/emailService';
-import { UserModel } from '../models/User';
+import { Request, Response } from "express";
+import { validationResult } from "express-validator";
+import otpModel from "../models/otpModel";
+import { sendEmail } from "../services/emailService";
+import { UserModel } from "../models/User";
 
 /**
  * Generate a random 6-digit OTP
  */
 function generateOTP(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 /**
  * Send OTP email
  */
 async function sendOTPEmail(email: string, otpCode: string): Promise<void> {
-    const appName = process.env.APP_NAME || 'Padlok';
-    const emailHtml = `
+  const appName = process.env.APP_NAME || "Padlok";
+  const emailHtml = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -120,7 +120,7 @@ async function sendOTPEmail(email: string, otpCode: string): Promise<void> {
 </html>
   `;
 
-    const emailText = `
+  const emailText = `
 Email Verification OTP
 
 Hello,
@@ -136,306 +136,313 @@ If you didn't request this verification code, please ignore this email.
 This is an automated email. Please do not reply.
   `;
 
-    const { error } = await sendEmail({
-        from: process.env.BREVO_SENDER_EMAIL || 'noreply@padlok.com',
-        to: email,
-        subject: 'Email Verification OTP',
-        html: emailHtml,
-        text: emailText,
-    });
+  const { error } = await sendEmail({
+    from: process.env.BREVO_SENDER_EMAIL || "noreply@padlok.com",
+    to: email,
+    subject: "Email Verification OTP",
+    html: emailHtml,
+    text: emailText,
+  });
 
-    if (error) {
-        throw new Error(`Failed to send OTP email: ${error.message}`);
-    }
+  if (error) {
+    throw new Error(`Failed to send OTP email: ${error.message}`);
+  }
 }
 
 const otpController = {
-    /**
-     * Send OTP to email
-     * POST /api/otp/send-otp
-     */
-    sendOTP: async (req: Request, res: Response): Promise<void> => {
-        try {
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                res.status(400).json({
-                    success: false,
-                    message: 'Validation failed',
-                    errors: errors.array(),
-                });
-                return;
-            }
+  /**
+   * Send OTP to email
+   * POST /api/otp/send-otp
+   */
+  sendOTP: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({
+          success: false,
+          message: "Validation failed",
+          errors: errors.array(),
+        });
+        return;
+      }
 
-            const { email } = req.body;
+      const { email } = req.body;
 
-            // Check if user already exists
-            const existingUser = await UserModel.findByEmail(email);
-            if (existingUser) {
-                res.status(400).json({
-                    success: false,
-                    message: 'User already exists',
-                });
-                return;
-            }
+      // Check if user already exists
+      const existingUser = await UserModel.findByEmail(email);
+      if (existingUser) {
+        res.status(400).json({
+          success: false,
+          message: "User already exists",
+        });
+        return;
+      }
 
-            // Check if there's an existing unverified OTP
-            const existingOTP = await otpModel.findValidOTP(email);
+      // Check if there's an existing unverified OTP
+      const existingOTP = await otpModel.findValidOTP(email);
 
-            let otpCode: string;
-            let otpDocument;
+      let otpCode: string;
+      let otpDocument;
 
-            if (existingOTP && new Date() < existingOTP.expiresAt && !existingOTP.verified && existingOTP.attempts < 5) {
-                // Use existing OTP if it's still valid
-                otpCode = existingOTP.otp;
-                otpDocument = existingOTP;
-            } else {
-                // Generate new OTP
-                otpCode = generateOTP();
-                const expiresAt = new Date();
-                expiresAt.setMinutes(expiresAt.getMinutes() + 30); // 30 minutes from now
+      if (
+        existingOTP &&
+        new Date() < existingOTP.expiresAt &&
+        !existingOTP.verified &&
+        existingOTP.attempts < 5
+      ) {
+        // Use existing OTP if it's still valid
+        otpCode = existingOTP.otp;
+        otpDocument = existingOTP;
+      } else {
+        // Generate new OTP
+        otpCode = generateOTP();
+        const expiresAt = new Date();
+        expiresAt.setMinutes(expiresAt.getMinutes() + 30); // 30 minutes from now
 
-                // Delete any existing unverified OTPs for this email
-                await otpModel.deleteUnverified(email);
+        // Delete any existing unverified OTPs for this email
+        await otpModel.deleteUnverified(email);
 
-                // Create new OTP
-                otpDocument = await otpModel.create({
-                    email,
-                    otp: otpCode,
-                    expiresAt,
-                    verified: false,
-                    attempts: 0,
-                });
-            }
+        // Create new OTP
+        otpDocument = await otpModel.create({
+          email,
+          otp: otpCode,
+          expiresAt,
+          verified: false,
+          attempts: 0,
+        });
+      }
 
-            // Send OTP email
-            try {
-                await sendOTPEmail(email, otpCode);
-            } catch (emailError: any) {
-                console.error('Error sending OTP email:', emailError);
-                // Delete the OTP if email sending fails
-                await otpModel.delete(otpDocument.id);
-                res.status(500).json({
-                    success: false,
-                    message: 'Failed to send OTP email. Please try again.',
-                });
-                return;
-            }
+      // Send OTP email
+      try {
+        await sendOTPEmail(email, otpCode);
+      } catch (emailError: any) {
+        console.error("Error sending OTP email:", emailError);
+        // Delete the OTP if email sending fails
+        await otpModel.delete(otpDocument.id);
+        res.status(500).json({
+          success: false,
+          message: "Failed to send OTP email. Please try again.",
+        });
+        return;
+      }
 
-            res.status(200).json({
-                success: true,
-                message: 'OTP sent successfully to your email',
-                data: {
-                    email,
-                    expiresIn: '30 minutes',
-                },
-            });
-        } catch (error: any) {
-            console.error('Send OTP error:', error);
-            res.status(500).json({
-                success: false,
-                message: error.message || 'Internal server error',
-            });
-        }
-    },
+      res.status(200).json({
+        success: true,
+        message: "OTP sent successfully to your email",
+        data: {
+          email,
+          expiresIn: "30 minutes",
+        },
+      });
+    } catch (error: any) {
+      console.error("Send OTP error:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message || "Internal server error",
+      });
+    }
+  },
 
-    /**
-     * Verify OTP
-     * POST /api/otp/verify-otp
-     */
-    verifyOTP: async (req: Request, res: Response): Promise<void> => {
-        try {
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                res.status(400).json({
-                    success: false,
-                    message: 'Validation failed',
-                    errors: errors.array(),
-                });
-                return;
-            }
+  /**
+   * Verify OTP
+   * POST /api/otp/verify-otp
+   */
+  verifyOTP: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({
+          success: false,
+          message: "Validation failed",
+          errors: errors.array(),
+        });
+        return;
+      }
 
-            const { email, otp } = req.body;
+      const { email, otp } = req.body;
 
-            // Find valid OTP
-            const otpDocument = await otpModel.findValidOTP(email);
+      // Find valid OTP
+      const otpDocument = await otpModel.findValidOTP(email);
 
-            if (!otpDocument) {
-                res.status(400).json({
-                    success: false,
-                    message: 'Invalid or expired OTP. Please request a new one.',
-                });
-                return;
-            }
+      if (!otpDocument) {
+        res.status(400).json({
+          success: false,
+          message: "Invalid or expired OTP. Please request a new one.",
+        });
+        return;
+      }
 
-            // Check if maximum attempts exceeded
-            if (otpDocument.attempts >= 5) {
-                await otpModel.delete(otpDocument.id);
-                res.status(400).json({
-                    success: false,
-                    message: 'Maximum verification attempts exceeded. Please request a new OTP.',
-                });
-                return;
-            }
+      // Check if maximum attempts exceeded
+      if (otpDocument.attempts >= 5) {
+        await otpModel.delete(otpDocument.id);
+        res.status(400).json({
+          success: false,
+          message:
+            "Maximum verification attempts exceeded. Please request a new OTP.",
+        });
+        return;
+      }
 
-            // Check if OTP is expired
-            if (new Date() > otpDocument.expiresAt) {
-                await otpModel.delete(otpDocument.id);
-                res.status(400).json({
-                    success: false,
-                    message: 'OTP has expired. Please request a new one.',
-                });
-                return;
-            }
+      // Check if OTP is expired
+      if (new Date() > otpDocument.expiresAt) {
+        await otpModel.delete(otpDocument.id);
+        res.status(400).json({
+          success: false,
+          message: "OTP has expired. Please request a new one.",
+        });
+        return;
+      }
 
-            // Verify OTP
-            if (otpDocument.otp !== otp) {
-                const updatedAttempts = otpDocument.attempts + 1;
-                await otpModel.update(otpDocument.id, { attempts: updatedAttempts });
+      // Verify OTP
+      if (otpDocument.otp !== otp) {
+        const updatedAttempts = otpDocument.attempts + 1;
+        await otpModel.update(otpDocument.id, { attempts: updatedAttempts });
 
-                const remainingAttempts = 5 - updatedAttempts;
+        const remainingAttempts = 5 - updatedAttempts;
 
-                res.status(400).json({
-                    success: false,
-                    message: `Invalid OTP. ${remainingAttempts > 0
-                        ? `${remainingAttempts} attempt(s) remaining.`
-                        : 'Maximum attempts exceeded.'
-                        }`,
-                    remainingAttempts: remainingAttempts > 0 ? remainingAttempts : 0,
-                });
-                return;
-            }
+        res.status(400).json({
+          success: false,
+          message: `Invalid OTP. ${
+            remainingAttempts > 0
+              ? `${remainingAttempts} attempt(s) remaining.`
+              : "Maximum attempts exceeded."
+          }`,
+          remainingAttempts: remainingAttempts > 0 ? remainingAttempts : 0,
+        });
+        return;
+      }
 
-            // Mark OTP as verified
-            await otpModel.update(otpDocument.id, { verified: true });
+      // Mark OTP as verified
+      await otpModel.update(otpDocument.id, { verified: true });
 
-            res.status(200).json({
-                success: true,
-                message: 'Email verified successfully',
-                data: {
-                    email,
-                    verified: true,
-                },
-            });
-        } catch (error: any) {
-            console.error('Verify OTP error:', error);
-            res.status(500).json({
-                success: false,
-                message: error.message || 'Internal server error',
-            });
-        }
-    },
+      res.status(200).json({
+        success: true,
+        message: "Email verified successfully",
+        data: {
+          email,
+          verified: true,
+        },
+      });
+    } catch (error: any) {
+      console.error("Verify OTP error:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message || "Internal server error",
+      });
+    }
+  },
 
-    /**
-     * Resend OTP
-     * POST /api/otp/resend-otp
-     */
-    resendOTP: async (req: Request, res: Response): Promise<void> => {
-        try {
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                res.status(400).json({
-                    success: false,
-                    message: 'Validation failed',
-                    errors: errors.array(),
-                });
-                return;
-            }
+  /**
+   * Resend OTP
+   * POST /api/otp/resend-otp
+   */
+  resendOTP: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({
+          success: false,
+          message: "Validation failed",
+          errors: errors.array(),
+        });
+        return;
+      }
 
-            const { email } = req.body;
+      const { email } = req.body;
 
-            // Delete any existing unverified OTPs for this email
-            await otpModel.deleteUnverified(email);
+      // Delete any existing unverified OTPs for this email
+      await otpModel.deleteUnverified(email);
 
-            // Generate new OTP
-            const otpCode = generateOTP();
-            const expiresAt = new Date();
-            expiresAt.setMinutes(expiresAt.getMinutes() + 30); // 30 minutes from now
+      // Generate new OTP
+      const otpCode = generateOTP();
+      const expiresAt = new Date();
+      expiresAt.setMinutes(expiresAt.getMinutes() + 30); // 30 minutes from now
 
-            // Create new OTP
-            const otpDocument = await otpModel.create({
-                email,
-                otp: otpCode,
-                expiresAt,
-                verified: false,
-                attempts: 0,
-            });
+      // Create new OTP
+      const otpDocument = await otpModel.create({
+        email,
+        otp: otpCode,
+        expiresAt,
+        verified: false,
+        attempts: 0,
+      });
 
-            // Send OTP email
-            try {
-                await sendOTPEmail(email, otpCode);
-            } catch (emailError: any) {
-                console.error('Error sending OTP email:', emailError);
-                // Delete the OTP if email sending fails
-                await otpModel.delete(otpDocument.id);
-                res.status(500).json({
-                    success: false,
-                    message: 'Failed to send OTP email. Please try again.',
-                });
-                return;
-            }
+      // Send OTP email
+      try {
+        await sendOTPEmail(email, otpCode);
+      } catch (emailError: any) {
+        console.error("Error sending OTP email:", emailError);
+        // Delete the OTP if email sending fails
+        await otpModel.delete(otpDocument.id);
+        res.status(500).json({
+          success: false,
+          message: "Failed to send OTP email. Please try again.",
+        });
+        return;
+      }
 
-            res.status(200).json({
-                success: true,
-                message: 'OTP resent successfully to your email',
-                data: {
-                    email,
-                    expiresIn: '30 minutes',
-                },
-            });
-        } catch (error: any) {
-            console.error('Resend OTP error:', error);
-            res.status(500).json({
-                success: false,
-                message: error.message || 'Internal server error',
-            });
-        }
-    },
+      res.status(200).json({
+        success: true,
+        message: "OTP resent successfully to your email",
+        data: {
+          email,
+          expiresIn: "30 minutes",
+        },
+      });
+    } catch (error: any) {
+      console.error("Resend OTP error:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message || "Internal server error",
+      });
+    }
+  },
 
-    /**
-     * Check if email is verified
-     * GET /api/otp/check-verification/:email
-     */
-    checkVerification: async (req: Request, res: Response): Promise<void> => {
-        try {
-            const { email } = req.params;
+  /**
+   * Check if email is verified
+   * GET /api/otp/check-verification/:email
+   */
+  checkVerification: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { email } = req.params;
 
-            if (!email) {
-                res.status(400).json({
-                    success: false,
-                    message: 'Email parameter is required',
-                });
-                return;
-            }
+      if (!email) {
+        res.status(400).json({
+          success: false,
+          message: "Email parameter is required",
+        });
+        return;
+      }
 
-            const verifiedOTP = await otpModel.findVerifiedOTP(email);
+      const verifiedOTP = await otpModel.findVerifiedOTP(email);
 
-            if (!verifiedOTP) {
-                res.status(200).json({
-                    success: true,
-                    data: {
-                        email,
-                        verified: false,
-                    },
-                });
-                return;
-            }
+      if (!verifiedOTP) {
+        res.status(200).json({
+          success: true,
+          data: {
+            email,
+            verified: false,
+          },
+        });
+        return;
+      }
 
-            res.status(200).json({
-                success: true,
-                data: {
-                    email,
-                    verified: true,
-                    verifiedAt: verifiedOTP.updatedAt,
-                },
-            });
-        } catch (error: any) {
-            console.error('Check verification error:', error);
-            res.status(500).json({
-                success: false,
-                message: error.message || 'Internal server error',
-            });
-        }
-    },
+      res.status(200).json({
+        success: true,
+        data: {
+          email,
+          verified: true,
+          verifiedAt: verifiedOTP.updatedAt,
+        },
+      });
+    } catch (error: any) {
+      console.error("Check verification error:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message || "Internal server error",
+      });
+    }
+  },
 };
 
 export default otpController;
