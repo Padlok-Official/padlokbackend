@@ -49,6 +49,10 @@ app.use("/api/v1/payment-methods", paymentMethodRoutes);
 app.use("/api/v1/otp", otpRoutes);
 app.use("/api/v1/admin", adminRoutes);
 
+app.get("/api/v1", (req, res) => {
+  res.send("API is running 🚀");
+});
+
 app.get("/health", async (_req, res) => {
   try {
     await db.query("SELECT 1");
