@@ -1,9 +1,14 @@
 import Paystack from "paystack-sdk";
 import crypto from "crypto";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const secretKey = process.env.PAYSTACK_SECRET_KEY!;
 if (!secretKey) {
-  console.error("CRITICAL: PAYSTACK_SECRET_KEY is not defined in environment variables!");
+  console.error(
+    "CRITICAL: PAYSTACK_SECRET_KEY is not defined in environment variables!",
+  );
 }
 const paystack = new Paystack(secretKey);
 
@@ -84,9 +89,7 @@ class PaystackService {
     });
 
     if (!result.status) {
-      throw new Error(
-        (result as any).message || "Account resolution failed",
-      );
+      throw new Error((result as any).message || "Account resolution failed");
     }
     return (result as any).data;
   }
@@ -151,9 +154,7 @@ class PaystackService {
     });
 
     if (!result.status) {
-      throw new Error(
-        (result as any).message || "Transfer initiation failed",
-      );
+      throw new Error((result as any).message || "Transfer initiation failed");
     }
     return (result as any).data;
   }
@@ -178,9 +179,7 @@ class PaystackService {
     });
 
     if (!result.status) {
-      throw new Error(
-        (result as any).message || "Charge authorization failed",
-      );
+      throw new Error((result as any).message || "Charge authorization failed");
     }
     return (result as any).data;
   }
