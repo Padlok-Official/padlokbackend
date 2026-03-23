@@ -34,6 +34,35 @@ export const loginValidator = [
   body('password').notEmpty().withMessage('Password is required'),
 ];
 
+export const setAppPinValidator = [
+  body('pin')
+    .notEmpty()
+    .withMessage('PIN is required')
+    .isLength({ min: 4, max: 6 })
+    .withMessage('PIN must be 4 to 6 digits')
+    .matches(/^\d+$/)
+    .withMessage('PIN must contain only digits'),
+];
+
+export const verifyAppPinValidator = [
+  body('pin')
+    .notEmpty()
+    .withMessage('PIN is required'),
+];
+
+export const changeAppPinValidator = [
+  body('old_pin')
+    .notEmpty()
+    .withMessage('Current PIN is required'),
+  body('new_pin')
+    .notEmpty()
+    .withMessage('New PIN is required')
+    .isLength({ min: 4, max: 6 })
+    .withMessage('PIN must be 4 to 6 digits')
+    .matches(/^\d+$/)
+    .withMessage('PIN must contain only digits'),
+];
+
 export const refreshTokenValidator = [
   body('refreshToken').notEmpty().withMessage('Refresh token is required'),
 ];

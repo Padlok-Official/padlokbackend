@@ -4,15 +4,21 @@ import {
   login,
   refreshToken,
   logout,
+  setAppPin,
+  verifyAppPin,
+  changeAppPin,
 } from '../controllers/authController';
 import {
   registerValidator,
   loginValidator,
   refreshTokenValidator,
+  setAppPinValidator,
+  verifyAppPinValidator,
+  changeAppPinValidator,
 } from '../validators/authValidators';
 import { handleValidationErrors } from '../middleware/validation';
 import { authenticate } from '../middleware/auth';
-import { authLimiter } from '../middleware/security';
+import { authLimiter, pinLimiter } from '../middleware/security';
 
 const router = Router();
 
@@ -41,5 +47,33 @@ router.post(
 );
 
 router.post('/logout', authenticate, logout);
+
+// App PIN endpoints
+router.post(
+  '/pin',
+  authenticate,
+  pinLimiter,
+  setAppPinValidator,
+  handleValidationErrors,
+  setAppPin
+);
+
+router.post(
+  '/pin/verify',
+  authenticate,
+  pinLimiter,
+  verifyAppPinValidator,
+  handleValidationErrors,
+  verifyAppPin
+);
+
+router.put(
+  '/pin',
+  authenticate,
+  pinLimiter,
+  changeAppPinValidator,
+  handleValidationErrors,
+  changeAppPin
+);
 
 export default router;

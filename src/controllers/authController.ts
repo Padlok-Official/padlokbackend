@@ -2,9 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { UserModel, WalletModel, RefreshTokenModel } from '../models';
+import { UserModel, WalletModel, RefreshTokenModel, AuditLogModel } from '../models';
 import { User, AuthenticatedRequest } from '../types';
 import { getCurrencyFromPhoneNumber } from '../utils/currencyUtils';
+
+const MAX_PIN_ATTEMPTS = 3;
+const PIN_LOCK_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 
 const JWT_SECRET = process.env.JWT_SECRET as string;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '7d';
@@ -18,7 +21,7 @@ function getRequestMeta(req: Request): { userAgent: string | null; ipAddress: st
   return { userAgent, ipAddress };
 }
 
-function toAuthUser(user: User) {
+function toAuthUser(user: User & { pin_set_at?: Date | null }) {
   return {
     id: user.id,
     name: user.name,
@@ -26,6 +29,7 @@ function toAuthUser(user: User) {
     phone_number: user.phone_number,
     email_verified: user.email_verified,
     phone_verified: user.phone_verified,
+    has_pin: !!user.pin_set_at,
   };
 }
 
@@ -244,6 +248,188 @@ export const refreshToken = async (
         expiresIn: JWT_EXPIRES_IN,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const setAppPin = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> => {
+  try {
+    const { pin } = req.body;
+    const userId = req.user!.id;
+
+    const { pin_hash } = await UserModel.getPinData(userId);
+    if (pin_hash) {
+      return res.status(409).json({
+        success: false,
+        message: 'App PIN is already set. Use change-pin to update it.',
+      });
+    }
+
+    const hash = await UserModel.hashPassword(pin);
+    await UserModel.setPin(userId, hash);
+
+    await AuditLogModel.log({
+      user_id: userId,
+      action: 'app_pin_set',
+      entity_type: 'user',
+      entity_id: userId,
+      ip_address: req.ip,
+      user_agent: req.headers['user-agent'],
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'App PIN set successfully',
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const verifyAppPin = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> => {
+  try {
+    const { pin } = req.body;
+    const userId = req.user!.id;
+
+    const pinData = await UserModel.getPinData(userId);
+    if (!pinData.pin_hash) {
+      return res.status(400).json({
+        success: false,
+        message: 'No app PIN set for this account.',
+      });
+    }
+
+    // Check lockout
+    if (pinData.pin_locked_until && new Date(pinData.pin_locked_until) > new Date()) {
+      const remainingMs = new Date(pinData.pin_locked_until).getTime() - Date.now();
+      const remainingMin = Math.ceil(remainingMs / 60000);
+      return res.status(429).json({
+        success: false,
+        message: `PIN locked due to too many failed attempts. Try again in ${remainingMin} minute(s).`,
+        locked_until: pinData.pin_locked_until,
+        remaining_minutes: remainingMin,
+      });
+    }
+
+    const valid = await UserModel.comparePassword(pin, pinData.pin_hash);
+
+    if (!valid) {
+      const attempts = await UserModel.incrementPinAttempts(userId);
+
+      if (attempts >= MAX_PIN_ATTEMPTS) {
+        const lockUntil = new Date(Date.now() + PIN_LOCK_DURATION_MS);
+        await UserModel.lockPin(userId, lockUntil);
+
+        await AuditLogModel.log({
+          user_id: userId,
+          action: 'app_pin_locked',
+          entity_type: 'user',
+          entity_id: userId,
+          details: { reason: 'max_attempts_exceeded', locked_until: lockUntil.toISOString() },
+          ip_address: req.ip,
+          user_agent: req.headers['user-agent'],
+        });
+
+        return res.status(429).json({
+          success: false,
+          message: 'PIN locked for 30 minutes due to too many failed attempts.',
+          locked_until: lockUntil,
+          remaining_attempts: 0,
+        });
+      }
+
+      await AuditLogModel.log({
+        user_id: userId,
+        action: 'app_pin_failed',
+        entity_type: 'user',
+        entity_id: userId,
+        details: { attempts },
+        ip_address: req.ip,
+        user_agent: req.headers['user-agent'],
+      });
+
+      return res.status(401).json({
+        success: false,
+        message: 'Incorrect PIN',
+        remaining_attempts: MAX_PIN_ATTEMPTS - attempts,
+      });
+    }
+
+    // Success — reset attempts
+    await UserModel.resetPinAttempts(userId);
+
+    res.json({ success: true, message: 'PIN verified' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const changeAppPin = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> => {
+  try {
+    const { old_pin, new_pin } = req.body;
+    const userId = req.user!.id;
+
+    const pinData = await UserModel.getPinData(userId);
+    if (!pinData.pin_hash) {
+      return res.status(400).json({
+        success: false,
+        message: 'No app PIN set for this account.',
+      });
+    }
+
+    // Check lockout (same protection as verify)
+    if (pinData.pin_locked_until && new Date(pinData.pin_locked_until) > new Date()) {
+      const remainingMs = new Date(pinData.pin_locked_until).getTime() - Date.now();
+      const remainingMin = Math.ceil(remainingMs / 60000);
+      return res.status(429).json({
+        success: false,
+        message: `PIN locked. Try again in ${remainingMin} minute(s).`,
+      });
+    }
+
+    const valid = await UserModel.comparePassword(old_pin, pinData.pin_hash);
+    if (!valid) {
+      const attempts = await UserModel.incrementPinAttempts(userId);
+
+      if (attempts >= MAX_PIN_ATTEMPTS) {
+        const lockUntil = new Date(Date.now() + PIN_LOCK_DURATION_MS);
+        await UserModel.lockPin(userId, lockUntil);
+      }
+
+      return res.status(401).json({
+        success: false,
+        message: 'Current PIN is incorrect',
+        remaining_attempts: Math.max(0, MAX_PIN_ATTEMPTS - attempts),
+      });
+    }
+
+    await UserModel.resetPinAttempts(userId);
+    const hash = await UserModel.hashPassword(new_pin);
+    await UserModel.setPin(userId, hash);
+
+    await AuditLogModel.log({
+      user_id: userId,
+      action: 'app_pin_changed',
+      entity_type: 'user',
+      entity_id: userId,
+      ip_address: req.ip,
+      user_agent: req.headers['user-agent'],
+    });
+
+    res.json({ success: true, message: 'App PIN changed successfully' });
   } catch (err) {
     next(err);
   }

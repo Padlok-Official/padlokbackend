@@ -58,6 +58,15 @@ export const initiateEscrow = async (
 
     const platformFeeRate = 0.03;
     const fee = Math.round(price * platformFeeRate * 100) / 100;
+    const totalRequired = price + fee;
+
+    // Check buyer has sufficient balance before creating the escrow
+    if (parseFloat(buyerWallet.balance) < totalRequired) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient wallet balance. You need GH₵${totalRequired.toFixed(2)} but have GH₵${parseFloat(buyerWallet.balance).toFixed(2)}.`,
+      });
+    }
 
     const pool = db.getPool()!;
     const client = await pool.connect();

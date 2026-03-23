@@ -5,9 +5,9 @@ import { User } from '../types';
 const SALT_ROUNDS = 12;
 
 export const UserModel = {
-  async findByEmail(email: string): Promise<(User & { password_hash: string; last_login_at: Date | null }) | null> {
-    const { rows } = await db.query<User & { password_hash: string; last_login_at: Date | null }>(
-      `SELECT id, name, email, phone_number, username, bio, location, profile_photo, password_hash, email_verified, phone_verified, is_active, fcm_token, created_at, last_login_at
+  async findByEmail(email: string): Promise<(User & { password_hash: string; last_login_at: Date | null; pin_set_at: Date | null }) | null> {
+    const { rows } = await db.query<User & { password_hash: string; last_login_at: Date | null; pin_set_at: Date | null }>(
+      `SELECT id, name, email, phone_number, username, bio, location, profile_photo, password_hash, email_verified, phone_verified, is_active, fcm_token, created_at, last_login_at, pin_set_at
        FROM users WHERE email = $1 AND is_active = TRUE`,
       [email.toLowerCase().trim()]
     );
@@ -176,6 +176,53 @@ export const UserModel = {
       'SELECT COUNT(*) FROM users WHERE is_active = TRUE AND fcm_token IS NOT NULL'
     );
     return parseInt(rows[0].count, 10);
+  },
+
+  async setPin(id: string, pinHash: string): Promise<void> {
+    await db.query(
+      'UPDATE users SET pin_hash = $1, pin_set_at = NOW(), updated_at = NOW() WHERE id = $2',
+      [pinHash, id]
+    );
+  },
+
+  async getPinData(id: string): Promise<{
+    pin_hash: string | null;
+    pin_set_at: Date | null;
+    pin_attempts: number;
+    pin_locked_until: Date | null;
+  }> {
+    const { rows } = await db.query<{
+      pin_hash: string | null;
+      pin_set_at: Date | null;
+      pin_attempts: number;
+      pin_locked_until: Date | null;
+    }>(
+      'SELECT pin_hash, pin_set_at, pin_attempts, pin_locked_until FROM users WHERE id = $1',
+      [id]
+    );
+    return rows[0] ?? { pin_hash: null, pin_set_at: null, pin_attempts: 0, pin_locked_until: null };
+  },
+
+  async incrementPinAttempts(id: string): Promise<number> {
+    const { rows } = await db.query<{ pin_attempts: number }>(
+      'UPDATE users SET pin_attempts = pin_attempts + 1, updated_at = NOW() WHERE id = $1 RETURNING pin_attempts',
+      [id]
+    );
+    return rows[0].pin_attempts;
+  },
+
+  async resetPinAttempts(id: string): Promise<void> {
+    await db.query(
+      'UPDATE users SET pin_attempts = 0, pin_locked_until = NULL, updated_at = NOW() WHERE id = $1',
+      [id]
+    );
+  },
+
+  async lockPin(id: string, lockedUntil: Date): Promise<void> {
+    await db.query(
+      'UPDATE users SET pin_locked_until = $1, updated_at = NOW() WHERE id = $2',
+      [lockedUntil, id]
+    );
   },
 
   async search(query: string, excludeUserId: string): Promise<User[]> {
