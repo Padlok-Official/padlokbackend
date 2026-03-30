@@ -97,6 +97,12 @@ export class SocketService {
       this.io.emit(event, data);
     }
   }
+
+  public async isUserOnline(userId: string): Promise<boolean> {
+    if (!this.io) return false;
+    const room = this.io.sockets.adapter.rooms.get(`user_${userId}`);
+    return !!room && room.size > 0;
+  }
 }
 
 export default SocketService.getInstance();

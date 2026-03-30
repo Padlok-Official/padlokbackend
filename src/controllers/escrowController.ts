@@ -10,9 +10,26 @@ import {
   WalletTransactionModel,
 } from "../models";
 import cloudinaryService from "../services/cloudinaryService";
+import { NotificationService } from "../services/notificationService";
 import socketService from "../services/socketService";
 
 import { AuthenticatedRequest, Wallet } from "../types";
+
+async function notifyUser(
+  userId: string,
+  title: string,
+  body: string,
+  navigationPayload?: { screen: string; params?: any },
+): Promise<void> {
+  const isOnline = await socketService.isUserOnline(userId);
+  if (!isOnline) {
+    try {
+      await NotificationService.sendToUser(userId, title, body, navigationPayload);
+    } catch (err) {
+      console.error(`Failed to send push notification to user ${userId}:`, err);
+    }
+  }
+}
 
 type WalletRequest = AuthenticatedRequest & { wallet?: Wallet };
 
@@ -112,6 +129,10 @@ export const initiateEscrow = async (
       });
       socketService.emitToUser(req.user!.id, "transaction:updated", {
         id: escrowTx.id,
+      });
+      await notifyUser(seller.id, "New Escrow Request", `${req.user!.name} wants to buy "${item_description}" for ₦${price}`, {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
       });
 
       return res.status(201).json({
@@ -321,6 +342,10 @@ export const setDeliveryAndFund = async (
       socketService.emitToUser(escrowTx.user_id, "transaction:updated", {
         id: escrowTx.id,
       });
+      await notifyUser(escrowTx.user_id, "Escrow Funded", `₦${price} is now locked in escrow. Delivery window: ${deliveryWindowLabel}.`, {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
+      });
 
       return res.status(200).json({
         success: true,
@@ -424,6 +449,10 @@ export const confirmDelivery = async (
       });
       socketService.emitToUser(escrowTx.receiver_id!, "transaction:updated", {
         id: escrowTx.id,
+      });
+      await notifyUser(escrowTx.user_id, "Delivery Confirmed", "Seller has confirmed delivery. Please confirm receipt or raise a dispute.", {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
       });
 
       return res.status(200).json({
@@ -562,6 +591,14 @@ export const confirmReceipt = async (
       socketService.emitToUser(escrowTx.user_id, "transaction:updated", {
         id: escrowTx.id,
       });
+      await notifyUser(escrowTx.receiver_id, "Escrow Completed", `₦${escrowTx.amount} has been released to your wallet.`, {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
+      });
+      await notifyUser(escrowTx.user_id, "Escrow Completed", "Transaction completed successfully.", {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
+      });
 
       return res.status(200).json({
         success: true,
@@ -655,6 +692,10 @@ export const raiseDispute = async (
         reason,
         raised_by: req.user!.name,
       });
+      await notifyUser(otherUserId, "Dispute Raised", `${req.user!.name} raised a dispute: "${reason}"`, {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
+      });
 
       await AuditLogModel.log({
         user_id: req.user!.id,
@@ -738,6 +779,10 @@ export const cancelEscrow = async (
       });
       socketService.emitToUser(escrowTx.user_id, "transaction:updated", {
         id: escrowTx.id,
+      });
+      await notifyUser(escrowTx.receiver_id, "Escrow Cancelled", "The buyer has cancelled the escrow transaction.", {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
       });
     } catch (err) {
       await client.query("ROLLBACK");
@@ -987,6 +1032,14 @@ export const resolveDispute = async (
       });
       socketService.emitToUser(escrowTx.receiver_id, "transaction:updated", {
         id: escrowTx.id,
+      });
+      await notifyUser(escrowTx.user_id, "Dispute Resolved", `Dispute resolved. Funds ${resolution === "refund" ? "refunded to you" : "released to seller"}.`, {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
+      });
+      await notifyUser(escrowTx.receiver_id, "Dispute Resolved", `Dispute resolved. Funds ${resolution === "refund" ? "refunded to buyer" : "released to you"}.`, {
+        screen: "/secured/transaction-details",
+        params: { id: escrowTx.id },
       });
 
       await AuditLogModel.log({
