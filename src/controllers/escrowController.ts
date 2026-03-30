@@ -21,13 +21,10 @@ async function notifyUser(
   body: string,
   navigationPayload?: { screen: string; params?: any },
 ): Promise<void> {
-  const isOnline = await socketService.isUserOnline(userId);
-  if (!isOnline) {
-    try {
-      await NotificationService.sendToUser(userId, title, body, navigationPayload);
-    } catch (err) {
-      console.error(`Failed to send push notification to user ${userId}:`, err);
-    }
+  try {
+    await NotificationService.sendToUser(userId, title, body, navigationPayload);
+  } catch (err) {
+    console.error(`Failed to send push notification to user ${userId}:`, err);
   }
 }
 
