@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { Pool, PoolConfig, QueryResult, QueryResultRow } from 'pg';
 import dotenv from 'dotenv';
 
@@ -54,7 +55,7 @@ class Database {
     this.pool = new Pool(config);
 
     this.pool.on('error', (err: Error) => {
-      console.error('Unexpected database pool error:', err);
+      logger.error({ data: err }, 'Unexpected database pool error');
     });
 
     return this.pool;
@@ -65,19 +66,19 @@ class Database {
 
     try {
       await pool.query('SELECT NOW()');
-      console.log('Database pool created successfully');
+      logger.info('Database pool created successfully');
     } catch (err: unknown) {
       const error = err as NodeJS.ErrnoException;
-      console.error('Error connecting to database:', error.message);
+      logger.error(`Error connecting to database: `);
 
       if (error.code === 'ENOTFOUND') {
-        console.error('💡 DNS resolution failed. Check hostname and network.');
+        logger.error('💡 DNS resolution failed. Check hostname and network.');
       } else if (error.code === 'ETIMEDOUT') {
-        console.error('💡 Connection timeout. Check firewall and network.');
+        logger.error('💡 Connection timeout. Check firewall and network.');
       } else if (error.code === 'ECONNREFUSED') {
-        console.error('💡 Connection refused. Verify host, port, and that DB is running.');
+        logger.error('💡 Connection refused. Verify host, port, and that DB is running.');
       } else if (error.code === '28P01') {
-        console.error('💡 Authentication failed. Check username and password.');
+        logger.error('💡 Authentication failed. Check username and password.');
       }
 
       throw err;
@@ -95,7 +96,7 @@ class Database {
     if (this.pool) {
       await this.pool.end();
       this.pool = null;
-      console.log('Database pool closed');
+      logger.info('Database pool closed');
     }
   }
 

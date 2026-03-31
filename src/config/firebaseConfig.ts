@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import * as admin from 'firebase-admin';
 import path from 'path';
 import fs from 'fs';
@@ -17,15 +18,15 @@ if (serviceAccountPath) {
             admin.initializeApp({
                 credential: admin.credential.cert(absolutePath),
             });
-            console.log('Firebase Admin SDK initialized successfully');
+            logger.info('Firebase Admin SDK initialized successfully');
         } else {
-            console.error(`Firebase service account file not found at: ${absolutePath}`);
+            logger.error(`Firebase service account file not found at: ${absolutePath}`);
         }
     } catch (error) {
-        console.error('Firebase Admin SDK initialization failed:', error);
+        logger.error({ data: error }, 'Firebase Admin SDK initialization failed');
     }
 } else {
-    console.warn('⚠️ FIREBASE_SERVICE_ACCOUNT_PATH not found in environment. Firebase notifications will not be sent.');
+    logger.warn('⚠️ FIREBASE_SERVICE_ACCOUNT_PATH not found in environment. Firebase notifications will not be sent.');
 }
 
 export default admin;

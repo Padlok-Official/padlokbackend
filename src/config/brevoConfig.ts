@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import dotenv from "dotenv";
 import axios from "axios";
 
@@ -46,7 +47,7 @@ async function sendEmail(options: SendEmailOptions): Promise<{
     error: { message: string } | null;
 }> {
     if (!apiKey) {
-        console.error(
+        logger.error(
             "Brevo is not initialized. Please set BREVO_API_KEY in your environment variables."
         );
         return {
@@ -131,7 +132,7 @@ async function sendEmail(options: SendEmailOptions): Promise<{
             error: null,
         };
     } catch (error: any) {
-        console.error("Error sending email via Brevo:", error);
+        logger.error("Error sending email via Brevo:", error);
         return {
             data: null,
             error: {

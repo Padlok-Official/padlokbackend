@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import 'dotenv/config';
 import db from '../config/database';
 
@@ -12,7 +13,7 @@ async function rollbackLast(): Promise<void> {
 
   const pool = db.getPool();
   if (!pool) {
-    console.error('Database pool not available');
+    logger.error('Database pool not available');
     process.exit(1);
   }
 
@@ -22,7 +23,7 @@ async function rollbackLast(): Promise<void> {
       `SELECT name FROM ${MIGRATIONS_TABLE} ORDER BY id DESC LIMIT 1`
     );
     if (rows.length === 0) {
-      console.log('No migrations to rollback.');
+      logger.info('No migrations to rollback.');
       return;
     }
     const last = rows[0].name;
@@ -31,10 +32,10 @@ async function rollbackLast(): Promise<void> {
       last,
     ]);
     await client.query('COMMIT');
-    console.log(`Rolled back: ${last}`);
+    logger.info(`Rolled back: ${last}`);
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Rollback failed:', (err as Error).message);
+    logger.error({ err }, 'Rollback failed');
     process.exit(1);
   } finally {
     client.release();

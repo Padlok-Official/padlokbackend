@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
@@ -32,7 +33,7 @@ async function runMigrations(): Promise<void> {
 
   const pool = db.getPool();
   if (!pool) {
-    console.error('Database pool not available');
+    logger.error('Database pool not available');
     process.exit(1);
   }
 
@@ -48,7 +49,7 @@ async function runMigrations(): Promise<void> {
     for (const file of files) {
       const name = file.replace('.sql', '');
       if (executed.includes(name)) {
-        console.log(`[SKIP] ${file}`);
+        logger.info(`[SKIP] ${file}`);
         continue;
       }
       const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
@@ -59,12 +60,12 @@ async function runMigrations(): Promise<void> {
         [name]
       );
       await client.query('COMMIT');
-      console.log(`[OK] ${file}`);
+      logger.info(`[OK] ${file}`);
     }
-    console.log('Migrations complete.');
+    logger.info('Migrations complete.');
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Migration failed:', (err as Error).message);
+    logger.error({ err }, 'Migration failed');
     process.exit(1);
   } finally {
     client.release();

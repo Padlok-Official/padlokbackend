@@ -1,3 +1,4 @@
+import logger from '../utils/logger';
 import { Job, Worker } from "bullmq";
 import db from "../config/database";
 import { redisConnection } from "../config/redis";
@@ -8,9 +9,9 @@ import {
   WalletModel,
   WalletTransactionModel,
 } from "../models";
-import { NotificationService } from "../services/notificationService";
-import { paystackService } from "../services/paystackService";
-import socketService from "../services/socketService";
+import { NotificationService } from "../infrastructure/notification/notificationService";
+import { paystackService } from "../infrastructure/paystack/paystackService";
+import socketService from "../infrastructure/socket/socketService";
 import { PaystackWebhookEvent } from "../types";
 
 export const setupPaystackWorker = () => {
@@ -18,7 +19,7 @@ export const setupPaystackWorker = () => {
     "paystack-webhook",
     async (job: Job<PaystackWebhookEvent>) => {
       const event = job.data;
-      console.log(
+      logger.info(
         `Processing Paystack event: ${event.event} [Job ID: ${job.id}]`,
       );
 
@@ -33,7 +34,7 @@ export const setupPaystackWorker = () => {
           await handleTransferFailed(event);
           break;
         default:
-          console.log(`Unhandled webhook event in worker: ${event.event}`);
+          logger.info(`Unhandled webhook event in worker: ${event.event}`);
       }
     },
     {
@@ -43,11 +44,11 @@ export const setupPaystackWorker = () => {
   );
 
   worker.on("completed", (job) => {
-    console.log(`Job ${job.id} completed successfully`);
+    logger.info(`Job ${job.id} completed successfully`);
   });
 
   worker.on("failed", (job, err) => {
-    console.error(`Job ${job?.id} failed with error: ${err.message}`);
+    logger.error(`Job ${job?.id} failed with error: ${err.message}`);
   });
 
   return worker;
@@ -67,7 +68,7 @@ async function notifyUser(
       navigationPayload,
     );
   } catch (err) {
-    console.error(`Failed to send push notification to user ${userId}:`, err);
+    logger.error({ err, userId }, "Failed to send push notification");
   }
 }
 
@@ -474,6 +475,6 @@ async function saveCardAuthorization(
       },
     });
   } catch (err) {
-    console.error("Failed to save card authorization:", err);
+    logger.error({ err }, "Failed to save card authorization");
   }
 }
