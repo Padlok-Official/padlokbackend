@@ -1,35 +1,37 @@
 import { body } from 'express-validator';
 
+// { values: 'falsy' } makes .optional() skip validation for empty strings, null, and undefined
+// This prevents validation errors when the frontend sends empty string fields for unchanged values
 export const updateProfileValidator = [
   body('name')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ min: 2, max: 255 })
     .withMessage('Name must be between 2 and 255 characters'),
   body('phone_number')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ min: 10, max: 50 })
     .withMessage('Phone number must be between 10 and 50 characters'),
   body('username')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ min: 3, max: 30 })
     .withMessage('Username must be between 3 and 30 characters')
     .matches(/^[a-zA-Z0-9_]+$/)
     .withMessage('Username can only contain letters, numbers and underscores'),
   body('bio')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ max: 500 })
     .withMessage('Bio cannot exceed 500 characters'),
   body('location')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ max: 255 })
     .withMessage('Location cannot exceed 255 characters'),
   body('profile_photo')
-    .optional()
+    .optional({ values: 'falsy' })
     .isString()
     .withMessage('Profile photo must be a string'),
 ];
