@@ -46,7 +46,7 @@ router.post(
   refreshToken
 );
 
-router.post('/logout', authenticate, logout);
+router.post('/logout', authLimiter, logout);
 
 // App PIN endpoints
 router.post(

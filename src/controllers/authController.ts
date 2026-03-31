@@ -11,6 +11,7 @@ const PIN_LOCK_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 
 const JWT_SECRET = process.env.JWT_SECRET as string;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '7d';
+const REFRESH_DAYS = parseInt(process.env.JWT_REFRESH_EXPIRES_IN ?? '30d', 10) || 30;
 
 const signOptions = { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions;
 
@@ -33,6 +34,31 @@ function toAuthUser(user: User & { pin_set_at?: Date | null }) {
   };
 }
 
+/** Issue a new access + refresh token pair and persist the refresh token */
+async function issueTokens(
+  userId: string,
+  email: string,
+  req: Request
+): Promise<{ accessToken: string; refreshToken: string; refreshTokenId: string }> {
+  const accessToken = jwt.sign({ userId, email }, JWT_SECRET, signOptions);
+
+  const refreshToken = uuidv4();
+  const refreshHash = await UserModel.hashPassword(refreshToken);
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + REFRESH_DAYS);
+
+  const { userAgent, ipAddress } = getRequestMeta(req);
+  const { id: refreshTokenId } = await RefreshTokenModel.create({
+    userId,
+    tokenHash: refreshHash,
+    expiresAt,
+    userAgent,
+    ipAddress,
+  });
+
+  return { accessToken, refreshToken, refreshTokenId };
+}
+
 export const register = async (
   req: Request,
   res: Response,
@@ -41,12 +67,7 @@ export const register = async (
   try {
     const { name, email, password, phone_number } = req.body;
 
-    console.log("user registeration data ----> ", req.body)
-
-    const existing = await UserModel.findByEmailOrPhone(
-      email,
-      phone_number
-    );
+    const existing = await UserModel.findByEmailOrPhone(email, phone_number);
     if (existing) {
       return res.status(409).json({
         success: false,
@@ -55,35 +76,12 @@ export const register = async (
     }
 
     const password_hash = await UserModel.hashPassword(password);
-    const user = await UserModel.create({
-      name,
-      email,
-      password_hash,
-      phone_number,
-    });
+    const user = await UserModel.create({ name, email, password_hash, phone_number });
 
     const currency = getCurrencyFromPhoneNumber(phone_number);
     await WalletModel.create(user.id, currency);
 
-    const accessToken = jwt.sign(
-      { userId: user.id, email: user.email },
-      JWT_SECRET,
-      signOptions
-    );
-
-    const refreshToken = uuidv4();
-    const refreshHash = await UserModel.hashPassword(refreshToken);
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
-
-    const { userAgent, ipAddress } = getRequestMeta(req);
-    await RefreshTokenModel.create({
-      userId: user.id,
-      tokenHash: refreshHash,
-      expiresAt,
-      userAgent,
-      ipAddress,
-    });
+    const { accessToken, refreshToken, refreshTokenId } = await issueTokens(user.id, user.email, req);
 
     res.status(201).json({
       success: true,
@@ -92,6 +90,7 @@ export const register = async (
         user: toAuthUser(user),
         accessToken,
         refreshToken,
+        refreshTokenId,
         expiresIn: JWT_EXPIRES_IN,
       },
     });
@@ -110,41 +109,17 @@ export const login = async (
 
     const user = await UserModel.findByEmail(email);
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password',
-      });
+      return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
     const valid = await UserModel.comparePassword(password, user.password_hash);
     if (!valid) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password',
-      });
+      return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
     await UserModel.updateLastLogin(user.id);
 
-    const accessToken = jwt.sign(
-      { userId: user.id, email: user.email },
-      JWT_SECRET,
-      signOptions
-    );
-
-    const refreshToken = uuidv4();
-    const refreshHash = await UserModel.hashPassword(refreshToken);
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
-
-    const { userAgent, ipAddress } = getRequestMeta(req);
-    await RefreshTokenModel.create({
-      userId: user.id,
-      tokenHash: refreshHash,
-      expiresAt,
-      userAgent,
-      ipAddress,
-    });
+    const { accessToken, refreshToken, refreshTokenId } = await issueTokens(user.id, user.email, req);
 
     res.json({
       success: true,
@@ -153,6 +128,7 @@ export const login = async (
         user: toAuthUser(user),
         accessToken,
         refreshToken,
+        refreshTokenId,
         expiresIn: JWT_EXPIRES_IN,
       },
     });
@@ -167,87 +143,161 @@ export const refreshToken = async (
   next: NextFunction
 ): Promise<void | Response> => {
   try {
-    const { refreshToken: token } = req.body;
-    const authHeader = req.headers.authorization;
-    const accessToken = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : null;
+    const { refreshToken: token, refreshTokenId } = req.body;
 
     if (!token) {
-      return res.status(400).json({
-        success: false,
-        message: 'Refresh token required',
-      });
+      return res.status(400).json({ success: false, message: 'Refresh token required' });
     }
 
-    let userId: string | null = null;
-    if (accessToken) {
-      const decoded = jwt.decode(accessToken) as { userId?: string } | null;
-      if (decoded?.userId) userId = decoded.userId;
+    // Decode the access token (expired or not) to get userId — only needed for fallback scan path
+    let userIdHint: string | null = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const decoded = jwt.decode(authHeader.slice(7)) as { userId?: string } | null;
+      if (decoded?.userId) userIdHint = decoded.userId;
     }
 
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Valid or expired access token required to refresh',
-      });
-    }
+    let matchedRow: { id: string; user_id: string; token_hash: string } | null = null;
 
-    const tokenRows = await RefreshTokenModel.findActiveByUserId(userId);
-    let matchedRow: (typeof tokenRows)[0] | null = null;
-    for (const row of tokenRows) {
-      const isMatch = await bcrypt.compare(token, row.token_hash);
-      if (isMatch) {
-        matchedRow = row;
-        break;
+    if (refreshTokenId && userIdHint) {
+      // Fast path: O(1) direct lookup by primary key
+      matchedRow = await RefreshTokenModel.findActiveById(refreshTokenId, userIdHint);
+      if (matchedRow) {
+        const isMatch = await bcrypt.compare(token, matchedRow.token_hash);
+        if (!isMatch) matchedRow = null;
       }
     }
 
     if (!matchedRow) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid or expired refresh token',
-      });
+      // Fallback: scan all active tokens (older clients / missing refreshTokenId)
+      if (!userIdHint) {
+        return res.status(401).json({
+          success: false,
+          message: 'Access token required to identify session',
+        });
+      }
+      const tokenRows = await RefreshTokenModel.findActiveByUserId(userIdHint);
+      for (const row of tokenRows) {
+        const isMatch = await bcrypt.compare(token, row.token_hash);
+        if (isMatch) { matchedRow = row; break; }
+      }
+    }
+
+    if (!matchedRow) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
     }
 
     const user = await UserModel.findById(matchedRow.user_id);
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not found or inactive',
-      });
+      return res.status(401).json({ success: false, message: 'User not found or inactive' });
     }
 
+    // Rotate: revoke old token, issue new pair
     await RefreshTokenModel.revokeById(matchedRow.id);
-
-    const newAccessToken = jwt.sign(
-      { userId: user.id, email: user.email },
-      JWT_SECRET,
-      signOptions
-    );
-
-    const newRefreshToken = uuidv4();
-    const refreshHash = await UserModel.hashPassword(newRefreshToken);
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
-
-    const { userAgent, ipAddress } = getRequestMeta(req);
-    await RefreshTokenModel.create({
-      userId: user.id,
-      tokenHash: refreshHash,
-      expiresAt,
-      userAgent,
-      ipAddress,
-    });
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken, refreshTokenId: newRefreshTokenId } =
+      await issueTokens(user.id, user.email, req);
 
     res.json({
       success: true,
       data: {
         accessToken: newAccessToken,
         refreshToken: newRefreshToken,
+        refreshTokenId: newRefreshTokenId,
         expiresIn: JWT_EXPIRES_IN,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Logout — public endpoint (no JWT required).
+ * Verifies ownership via the refresh token itself, so it works even when the access token is expired.
+ * Supports:
+ *  - Single-device logout (default): revoke the provided refresh token
+ *  - All-device logout: pass `all: true` in body (requires access token for identity)
+ */
+export const logout = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void | Response> => {
+  try {
+    const { refreshToken: token, refreshTokenId, all } = req.body;
+
+    if (all) {
+      // All-device logout: require access token to identify the user
+      const authHeader = req.headers.authorization;
+      const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      if (!accessToken) {
+        return res.status(400).json({ success: false, message: 'Access token required for all-device logout' });
+      }
+      let userId: string | null = null;
+      try {
+        const decoded = jwt.verify(accessToken, JWT_SECRET) as { userId: string };
+        userId = decoded.userId;
+      } catch {
+        // Allow expired access token for logout-all
+        const decoded = jwt.decode(accessToken) as { userId?: string } | null;
+        if (decoded?.userId) userId = decoded.userId;
+      }
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Could not identify user' });
+      }
+      await RefreshTokenModel.revokeAllByUserId(userId);
+      return res.json({ success: true, message: 'All sessions revoked' });
+    }
+
+    if (!token) {
+      // No token provided — still return success (idempotent logout)
+      return res.json({ success: true, message: 'Logged out' });
+    }
+
+    // Single-device logout: verify and revoke the specific token
+    let revoked = false;
+
+    if (refreshTokenId) {
+      // Fast path: decode access token for userId hint, then O(1) lookup
+      const authHeader = req.headers.authorization;
+      const decoded = authHeader?.startsWith('Bearer ')
+        ? (jwt.decode(authHeader.slice(7)) as { userId?: string } | null)
+        : null;
+      const userId = decoded?.userId ?? null;
+
+      if (userId) {
+        const row = await RefreshTokenModel.findActiveById(refreshTokenId, userId);
+        if (row) {
+          const isMatch = await bcrypt.compare(token, row.token_hash);
+          if (isMatch) {
+            await RefreshTokenModel.revokeById(row.id);
+            revoked = true;
+          }
+        }
+      }
+    }
+
+    if (!revoked) {
+      // Fallback scan — extract userId from whatever auth info we have
+      const authHeader = req.headers.authorization;
+      const decoded = authHeader?.startsWith('Bearer ')
+        ? (jwt.decode(authHeader.slice(7)) as { userId?: string } | null)
+        : null;
+      const userId = decoded?.userId ?? null;
+
+      if (userId) {
+        const tokenRows = await RefreshTokenModel.findActiveByUserId(userId);
+        for (const row of tokenRows) {
+          const isMatch = await bcrypt.compare(token, row.token_hash);
+          if (isMatch) {
+            await RefreshTokenModel.revokeById(row.id);
+            break;
+          }
+        }
+      }
+    }
+
+    res.json({ success: true, message: 'Logged out successfully' });
   } catch (err) {
     next(err);
   }
@@ -282,10 +332,7 @@ export const setAppPin = async (
       user_agent: req.headers['user-agent'],
     });
 
-    res.status(201).json({
-      success: true,
-      message: 'App PIN set successfully',
-    });
+    res.status(201).json({ success: true, message: 'App PIN set successfully' });
   } catch (err) {
     next(err);
   }
@@ -302,13 +349,9 @@ export const verifyAppPin = async (
 
     const pinData = await UserModel.getPinData(userId);
     if (!pinData.pin_hash) {
-      return res.status(400).json({
-        success: false,
-        message: 'No app PIN set for this account.',
-      });
+      return res.status(400).json({ success: false, message: 'No app PIN set for this account.' });
     }
 
-    // Check lockout
     if (pinData.pin_locked_until && new Date(pinData.pin_locked_until) > new Date()) {
       const remainingMs = new Date(pinData.pin_locked_until).getTime() - Date.now();
       const remainingMin = Math.ceil(remainingMs / 60000);
@@ -364,9 +407,7 @@ export const verifyAppPin = async (
       });
     }
 
-    // Success — reset attempts
     await UserModel.resetPinAttempts(userId);
-
     res.json({ success: true, message: 'PIN verified' });
   } catch (err) {
     next(err);
@@ -384,13 +425,9 @@ export const changeAppPin = async (
 
     const pinData = await UserModel.getPinData(userId);
     if (!pinData.pin_hash) {
-      return res.status(400).json({
-        success: false,
-        message: 'No app PIN set for this account.',
-      });
+      return res.status(400).json({ success: false, message: 'No app PIN set for this account.' });
     }
 
-    // Check lockout (same protection as verify)
     if (pinData.pin_locked_until && new Date(pinData.pin_locked_until) > new Date()) {
       const remainingMs = new Date(pinData.pin_locked_until).getTime() - Date.now();
       const remainingMin = Math.ceil(remainingMs / 60000);
@@ -403,12 +440,10 @@ export const changeAppPin = async (
     const valid = await UserModel.comparePassword(old_pin, pinData.pin_hash);
     if (!valid) {
       const attempts = await UserModel.incrementPinAttempts(userId);
-
       if (attempts >= MAX_PIN_ATTEMPTS) {
         const lockUntil = new Date(Date.now() + PIN_LOCK_DURATION_MS);
         await UserModel.lockPin(userId, lockUntil);
       }
-
       return res.status(401).json({
         success: false,
         message: 'Current PIN is incorrect',
@@ -430,31 +465,6 @@ export const changeAppPin = async (
     });
 
     res.json({ success: true, message: 'App PIN changed successfully' });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const logout = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void | Response> => {
-  try {
-    const { refreshToken: token } = req.body;
-
-    if (token) {
-      const tokenRows = await RefreshTokenModel.findActiveByUserId(req.user!.id);
-      for (const row of tokenRows) {
-        const isMatch = await bcrypt.compare(token, row.token_hash);
-        if (isMatch) {
-          await RefreshTokenModel.revokeById(row.id);
-          break;
-        }
-      }
-    }
-
-    res.json({ success: true, message: 'Logged out successfully' });
   } catch (err) {
     next(err);
   }
