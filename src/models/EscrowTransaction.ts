@@ -11,7 +11,8 @@ export const EscrowTransactionModel = {
       seller_id: string;
       buyer_wallet_id: string;
       seller_wallet_id: string;
-      item_description: string;
+      item_title: string;
+      item_description?: string;
       item_photos: string[];
       price: string;
       fee?: string;
@@ -27,18 +28,19 @@ export const EscrowTransactionModel = {
 
     const { rows } = await client.query<EscrowTransaction>(
       `INSERT INTO transactions
-        (type, status, reference, amount, fee, currency, user_id, 
-         receiver_id, item_description, item_photos, metadata)
-       VALUES ('escrow', 'initiated', $1, $2, $3, $4, $5, $6, $7, $8, $9)
+        (type, status, reference, amount, fee, currency, user_id,
+         receiver_id, item_title, item_description, item_photos, metadata)
+       VALUES ('escrow', 'initiated', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         data.reference,
         data.price,
         data.fee || '0',
-        data.currency || 'NGN',
+        data.currency || 'GHS',
         data.buyer_id,
         data.seller_id,
-        data.item_description,
+        data.item_title,
+        data.item_description || null,
         data.item_photos,
         JSON.stringify(metadata),
       ]

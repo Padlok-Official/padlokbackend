@@ -5,10 +5,16 @@ export const initiateEscrowValidator = [
     .isEmail()
     .normalizeEmail()
     .withMessage('Valid seller email is required'),
-  body('item_description')
+  body('item_title')
     .isString()
-    .isLength({ min: 10, max: 1000 })
-    .withMessage('Item description must be 10-1000 characters'),
+    .trim()
+    .isLength({ min: 3, max: 255 })
+    .withMessage('Item title must be 3-255 characters'),
+  body('item_description')
+    .optional({ values: 'falsy' })
+    .isString()
+    .isLength({ max: 1000 })
+    .withMessage('Item description must be 1000 characters or fewer'),
   body('item_photos')
     .isArray({ min: 1, max: 10 })
     .withMessage('At least 1 photo is required (max 10)'),
@@ -16,12 +22,12 @@ export const initiateEscrowValidator = [
     .isURL()
     .withMessage('Each photo must be a valid URL'),
   body('price')
-    .isDecimal({ decimal_digits: '0,2' })
+    .isNumeric()
     .withMessage('Price must be a valid number')
-    .custom((val) => parseFloat(val) >= 100)
-    .withMessage('Minimum escrow amount is NGN 100')
-    .custom((val) => parseFloat(val) <= 10000000)
-    .withMessage('Maximum escrow amount is NGN 10,000,000'),
+    .custom((val) => Number(val) >= 100)
+    .withMessage('Minimum escrow amount is 100')
+    .custom((val) => Number(val) <= 10000000)
+    .withMessage('Maximum escrow amount is 10,000,000'),
   body('pin')
     .notEmpty()
     .withMessage('Transaction PIN is required'),

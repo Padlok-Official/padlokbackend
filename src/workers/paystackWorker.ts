@@ -13,6 +13,7 @@ import { NotificationService } from "../infrastructure/notification/notification
 import { paystackService } from "../infrastructure/paystack/paystackService";
 import socketService from "../infrastructure/socket/socketService";
 import { PaystackWebhookEvent } from "../types";
+import { getCurrencySymbol } from "../utils/currencyUtils";
 
 export const setupPaystackWorker = () => {
   const worker = new Worker(
@@ -72,12 +73,12 @@ async function notifyUser(
   }
 }
 
-async function getWalletOwner(walletId: string): Promise<string | null> {
-  const { rows } = await db.query<{ user_id: string }>(
-    `SELECT user_id FROM wallets WHERE id = $1`,
+async function getWalletOwner(walletId: string): Promise<{ user_id: string; currency: string } | null> {
+  const { rows } = await db.query<{ user_id: string; currency: string }>(
+    `SELECT user_id, currency FROM wallets WHERE id = $1`,
     [walletId],
   );
-  return rows[0]?.user_id ?? null;
+  return rows[0] ?? null;
 }
 
 async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
@@ -129,18 +130,19 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
         }
 
         // Notify user of wallet update
-        const walletOwner = await getWalletOwner(walletTx.wallet_id);
-        if (walletOwner) {
-          socketService.emitToUser(walletOwner, "wallet:updated", {
+        const walletInfo = await getWalletOwner(walletTx.wallet_id);
+        if (walletInfo) {
+          const symbol = getCurrencySymbol(walletInfo.currency);
+          socketService.emitToUser(walletInfo.user_id, "wallet:updated", {
             wallet_id: walletTx.wallet_id,
           });
-          socketService.emitToUser(walletOwner, "transaction:updated", {
+          socketService.emitToUser(walletInfo.user_id, "transaction:updated", {
             type: "deposit",
           });
           await notifyUser(
-            walletOwner,
+            walletInfo.user_id,
             "Deposit Successful",
-            `${amountInNaira} has been added to your wallet.`,
+            `${symbol}${amountInNaira} has been added to your wallet.`,
             {
               screen: "/secured/(tabs)",
             },
@@ -251,19 +253,20 @@ async function handleTransferSuccess(
       );
       await client.query("COMMIT");
 
-      const walletOwner = await getWalletOwner(walletTx.wallet_id);
-      if (walletOwner) {
-        socketService.emitToUser(walletOwner, "wallet:updated", {
+      const walletInfo = await getWalletOwner(walletTx.wallet_id);
+      if (walletInfo) {
+        const symbol = getCurrencySymbol(walletInfo.currency);
+        socketService.emitToUser(walletInfo.user_id, "wallet:updated", {
           wallet_id: walletTx.wallet_id,
         });
-        socketService.emitToUser(walletOwner, "transaction:updated", {
+        socketService.emitToUser(walletInfo.user_id, "transaction:updated", {
           type: "withdrawal",
           status: "completed",
         });
         await notifyUser(
-          walletOwner,
+          walletInfo.user_id,
           "Withdrawal Successful",
-          `₦${walletTx.amount} has been sent to your bank account.`,
+          `${symbol}${walletTx.amount} has been sent to your bank account.`,
           {
             screen: "/secured/(tabs)",
           },
@@ -299,8 +302,11 @@ async function handleTransferSuccess(
       await TransactionModel.updateStatus(client, transaction.id, "completed");
       await client.query("COMMIT");
 
+      const txWalletId = (transaction.metadata as any)?.wallet_id;
+      const txWalletInfo = txWalletId ? await getWalletOwner(txWalletId) : null;
+      const txSymbol = getCurrencySymbol(txWalletInfo?.currency || 'GHS');
       socketService.emitToUser(transaction.user_id, "wallet:updated", {
-        wallet_id: (transaction.metadata as any)?.wallet_id,
+        wallet_id: txWalletId,
       });
       socketService.emitToUser(transaction.user_id, "transaction:updated", {
         id: transaction.id,
@@ -310,7 +316,7 @@ async function handleTransferSuccess(
       await notifyUser(
         transaction.user_id,
         "Withdrawal Successful",
-        `₦${transaction.amount} has been sent to your bank account.`,
+        `${txSymbol}${transaction.amount} has been sent to your bank account.`,
         {
           screen: "/secured/transaction-details",
           params: { id: transaction.id },
@@ -352,19 +358,20 @@ async function handleTransferFailed(
       await WalletTransactionModel.updateStatus(client, walletTx.id, "failed");
       await client.query("COMMIT");
 
-      const walletOwner = await getWalletOwner(walletTx.wallet_id);
-      if (walletOwner) {
-        socketService.emitToUser(walletOwner, "wallet:updated", {
+      const walletInfo = await getWalletOwner(walletTx.wallet_id);
+      if (walletInfo) {
+        const symbol = getCurrencySymbol(walletInfo.currency);
+        socketService.emitToUser(walletInfo.user_id, "wallet:updated", {
           wallet_id: walletTx.wallet_id,
         });
-        socketService.emitToUser(walletOwner, "transaction:updated", {
+        socketService.emitToUser(walletInfo.user_id, "transaction:updated", {
           type: "withdrawal",
           status: "failed",
         });
         await notifyUser(
-          walletOwner,
+          walletInfo.user_id,
           "Withdrawal Failed",
-          `Your withdrawal of ₦${walletTx.amount} failed. The amount has been refunded to your wallet.`,
+          `Your withdrawal of ${symbol}${walletTx.amount} failed. The amount has been refunded to your wallet.`,
           {
             screen: "/secured/(tabs)",
           },
@@ -404,6 +411,8 @@ async function handleTransferFailed(
       await TransactionModel.updateStatus(client, transaction.id, "failed");
       await client.query("COMMIT");
 
+      const failedWalletInfo = await getWalletOwner(walletId);
+      const failedSymbol = getCurrencySymbol(failedWalletInfo?.currency || 'GHS');
       socketService.emitToUser(transaction.user_id, "wallet:updated", {
         wallet_id: walletId,
       });
@@ -415,7 +424,7 @@ async function handleTransferFailed(
       await notifyUser(
         transaction.user_id,
         "Withdrawal Failed",
-        `Your withdrawal of ₦${transaction.amount} failed. The amount has been refunded to your wallet.`,
+        `Your withdrawal of ${failedSymbol}${transaction.amount} failed. The amount has been refunded to your wallet.`,
         {
           screen: "/secured/transaction-details",
           params: { id: transaction.id },

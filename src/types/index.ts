@@ -133,6 +133,17 @@ export interface Dispute {
   updated_at: Date;
 }
 
+// Rating / feedback for completed transactions
+export interface Rating {
+  id: string;
+  transaction_id: string;
+  reviewer_id: string;
+  reviewee_id: string;
+  rating: number;
+  comment: string | null;
+  created_at: Date;
+}
+
 // Idempotency key for preventing double-processing
 export interface IdempotencyKey {
   id: string;
@@ -180,6 +191,7 @@ export interface Transaction {
   paystack_reference?: string;
   payment_method_id?: string;
   receiver_id?: string;
+  item_title?: string;
   item_photos?: string[];
   item_description?: string;
   delivery_window?: string; // PostgreSQL interval as string

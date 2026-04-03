@@ -1,3 +1,23 @@
+// All supported country dial prefixes, longest first so matching is greedy
+const COUNTRY_PREFIXES = [
+  '+233', '+234', '+254', '+256', '+255', '+250',
+  '+225', '+221', '+228', '+229', '+223', '+227', '+226', '+245',
+  '+237', '+241', '+242', '+235', '+236', '+240',
+  '+27',
+] as const;
+
+/**
+ * Extract the country dial prefix (e.g. "+233") from an E.164 phone number.
+ * Returns null if no known prefix matches.
+ */
+export function getPhoneCountryPrefix(phoneNumber: string): string | null {
+  if (!phoneNumber) return null;
+  for (const prefix of COUNTRY_PREFIXES) {
+    if (phoneNumber.startsWith(prefix)) return prefix;
+  }
+  return null;
+}
+
 /**
  * Utility to derive currency from phone number country codes.
  */
@@ -36,4 +56,20 @@ export function getCurrencyFromPhoneNumber(phoneNumber: string): string {
 
   // Default to NGN for anything else (or Nigeria +234)
   return 'NGN';
+}
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  GHS: 'GH₵',
+  NGN: '₦',
+  KES: 'KSh',
+  ZAR: 'R',
+  UGX: 'USh',
+  TZS: 'TSh',
+  RWF: 'RF',
+  XOF: 'CFA',
+  XAF: 'FCFA',
+};
+
+export function getCurrencySymbol(currencyCode: string): string {
+  return CURRENCY_SYMBOLS[currencyCode] || currencyCode;
 }

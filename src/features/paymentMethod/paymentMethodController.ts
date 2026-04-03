@@ -53,6 +53,16 @@ export const deletePaymentMethod = async (req: WalletRequest, res: Response, nex
   } catch (err) { next(err); }
 };
 
+export const verifyAccount = async (req: WalletRequest, res: Response, next: NextFunction): Promise<void | Response> => {
+  try {
+    const data = await paymentMethodService.verifyAccount({
+      accountNumber: req.body.account_number,
+      bankCode: req.body.bank_code,
+    });
+    return ok(res, data, 'Account verified successfully');
+  } catch (err) { next(err); }
+};
+
 export const listBanks = async (_req: WalletRequest, res: Response, next: NextFunction): Promise<void | Response> => {
   try {
     const banks = await paystackService.listBanks();

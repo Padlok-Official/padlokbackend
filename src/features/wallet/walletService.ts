@@ -66,6 +66,7 @@ export const walletService = {
       metadata: { wallet_id: params.walletId, user_id: params.userId, type: 'wallet_funding' },
     });
 
+    const wallet = await WalletModel.findById(params.walletId);
     await withTransaction(async (client) => {
       await TransactionModel.create(client, {
         type: 'deposit',
@@ -75,6 +76,7 @@ export const walletService = {
         reference,
         paystack_reference: paystackResult.reference,
         item_description: 'Wallet funding via Paystack',
+        currency: wallet?.currency,
         metadata: { wallet_id: params.walletId, balance_before: params.walletBalance, source: 'wallet_funding' },
       });
     });
@@ -163,6 +165,7 @@ export const walletService = {
     const limitCheck = await WalletModel.checkSpendingLimits(params.walletId, params.amount);
     if (!limitCheck.allowed) throw new AppError(limitCheck.reason!, 400);
 
+    const withdrawWallet = await WalletModel.findById(params.walletId);
     const reference = `padlok_withdraw_${uuidv4()}`;
     let transaction: Awaited<ReturnType<typeof TransactionModel.create>>;
 
@@ -178,6 +181,7 @@ export const walletService = {
           reference,
           payment_method_id: params.paymentMethodId,
           item_description: `Withdrawal to ${paymentMethod.provider || 'bank'} - ****${(paymentMethod as any).last_four || ''}`,
+          currency: withdrawWallet?.currency,
           metadata: {
             wallet_id: params.walletId,
             balance_before: balanceResult.balance_before,

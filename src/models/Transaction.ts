@@ -35,7 +35,7 @@ export const TransactionModel = {
         data.reference,
         data.amount,
         data.fee || '0',
-        data.currency || 'NGN',
+        data.currency || 'GHS',
         data.user_id,
         data.paystack_reference || null,
         data.payment_method_id || null,

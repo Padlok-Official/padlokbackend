@@ -225,17 +225,47 @@ export const UserModel = {
     );
   },
 
-  async search(query: string, excludeUserId: string): Promise<User[]> {
-    const searchTerm = `%${query.trim().toLowerCase()}%`;
+  async search(query: string, excludeUserId: string, countryPrefix?: string | null): Promise<User[]> {
+    const trimmed = query.trim().toLowerCase();
+    const searchTerm = `%${trimmed}%`;
+
+    // If the query starts with 0, also search without the leading 0
+    // so that "0241234567" matches "+233241234567"
+    const looksLikeLocalPhone = /^0\d+$/.test(trimmed);
+    const phoneVariant = looksLikeLocalPhone ? `%${trimmed.slice(1)}%` : null;
+
+    // Build dynamic WHERE clauses and params
+    const conditions: string[] = [];
+    const params: (string | null)[] = [searchTerm, excludeUserId];
+    let paramIndex = 3;
+
+    // Search conditions
+    const searchClauses = [`phone_number LIKE $1`];
+    if (phoneVariant) {
+      searchClauses.push(`phone_number LIKE $${paramIndex}`);
+      params.push(phoneVariant);
+      paramIndex++;
+    }
+    searchClauses.push(`name ILIKE $1`, `username ILIKE $1`);
+    conditions.push(`(${searchClauses.join(' OR ')})`);
+
+    conditions.push(`id != $2`);
+    conditions.push(`is_active = TRUE`);
+
+    // Restrict to same country when prefix is known
+    if (countryPrefix) {
+      conditions.push(`phone_number LIKE $${paramIndex}`);
+      params.push(`${countryPrefix}%`);
+      paramIndex++;
+    }
+
     const { rows } = await db.query<User>(
       `SELECT id, name, email, phone_number, username, bio, location, profile_photo, email_verified, phone_verified, is_active, created_at
-       FROM users 
-       WHERE (phone_number LIKE $1 OR name ILIKE $1 OR username ILIKE $1) 
-       AND id != $2
-       AND is_active = TRUE
+       FROM users
+       WHERE ${conditions.join(' AND ')}
        ORDER BY phone_verified DESC, name ASC
        LIMIT 10`,
-      [searchTerm, excludeUserId]
+      params
     );
     return rows;
   },

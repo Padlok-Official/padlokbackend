@@ -14,6 +14,7 @@ import socketService from '../../infrastructure/socket/socketService';
 import { withTransaction } from '../../utils/withTransaction';
 import { AppError } from '../../utils/AppError';
 import { Wallet } from '../../types';
+import { getCurrencySymbol } from '../../utils/currencyUtils';
 
 type Meta = { ip_address?: string | undefined; user_agent?: string | undefined };
 
@@ -34,12 +35,13 @@ export const escrowService = {
     buyerName: string;
     buyerWallet: Wallet;
     sellerEmail: string;
-    itemDescription: string;
+    itemTitle: string;
+    itemDescription?: string;
     itemPhotos: string[];
     price: number;
     meta: Meta;
   }) {
-    const { buyerId, buyerName, buyerWallet, sellerEmail, itemDescription, itemPhotos, price, meta } = params;
+    const { buyerId, buyerName, buyerWallet, sellerEmail, itemTitle, itemDescription, itemPhotos, price, meta } = params;
 
     const seller = await UserModel.findByEmail(sellerEmail);
     if (!seller) throw new AppError('Seller not found', 404);
@@ -53,7 +55,7 @@ export const escrowService = {
 
     if (parseFloat(buyerWallet.balance) < totalRequired) {
       throw new AppError(
-        `Insufficient wallet balance. You need GH₵${totalRequired.toFixed(2)} but have GH₵${parseFloat(buyerWallet.balance).toFixed(2)}.`,
+        `Insufficient wallet balance. You need ${getCurrencySymbol(buyerWallet.currency)}${totalRequired.toFixed(2)} but have ${getCurrencySymbol(buyerWallet.currency)}${parseFloat(buyerWallet.balance).toFixed(2)}.`,
         400,
       );
     }
@@ -66,10 +68,12 @@ export const escrowService = {
         seller_id: seller.id,
         buyer_wallet_id: buyerWallet.id,
         seller_wallet_id: sellerWallet.id,
+        item_title: itemTitle,
         item_description: itemDescription,
         item_photos: itemPhotos,
         price: price.toString(),
         fee: fee.toString(),
+        currency: buyerWallet.currency,
       }),
     );
 
@@ -87,6 +91,7 @@ export const escrowService = {
       reference: escrowTx.reference,
       buyer_name: buyerName,
       price,
+      item_title: itemTitle,
       item_description: itemDescription,
     });
     socketService.emitToUser(seller.id, 'transaction:updated', { id: escrowTx.id });
@@ -97,7 +102,7 @@ export const escrowService = {
       await notifyUser(
         seller.id,
         'New Escrow Request',
-        `${buyerName} wants to buy "${itemDescription}" for ₦${price}`,
+        `${buyerName} wants to buy "${itemTitle}" for ${getCurrencySymbol(buyerWallet.currency)}${price}`,
         '/secured/transaction-details',
         { id: escrowTx.id },
       );
@@ -155,6 +160,7 @@ export const escrowService = {
         reference: `${escrowTx.reference}_lock`,
         escrow_transaction_id: escrowTx.id,
         description: `Escrow payment for: ${escrowTx.item_description.substring(0, 100)}`,
+        currency: buyerWallet.currency,
       });
 
       const deliveryDeadline = new Date(Date.now() + deliveryHours * 60 * 60 * 1000);
@@ -164,7 +170,7 @@ export const escrowService = {
         delivery_window: `${deliveryHours} hours`,
       });
 
-      return { escrowTx, deliveryDeadline, price, fee };
+      return { escrowTx, deliveryDeadline, price, fee, currency: buyerWallet.currency };
     });
 
     const deliveryWindowLabel =
@@ -194,7 +200,7 @@ export const escrowService = {
     await notifyUser(
       buyerId,
       'Escrow Funded',
-      `₦${result.price} is now locked in escrow. Delivery window: ${deliveryWindowLabel}.`,
+      `${getCurrencySymbol(result.currency)}${result.price} is now locked in escrow. Delivery window: ${deliveryWindowLabel}.`,
       '/secured/transaction-details',
       { id: escrowId },
     );
@@ -255,6 +261,7 @@ export const escrowService = {
       const sellerWalletId = (tx.metadata as any)?.receiver_wallet_id;
       if (!sellerWalletId) throw new AppError('Seller wallet ID not found in metadata', 500);
 
+      const sellerWallet = await WalletModel.findById(sellerWalletId);
       const balanceResult = await WalletModel.creditBalance(client, sellerWalletId, tx.amount);
       await EscrowTransactionModel.updateStatus(client, tx.id, 'completed', { buyer_confirmed_at: new Date() });
 
@@ -268,13 +275,14 @@ export const escrowService = {
         reference: `${tx.reference}_release`,
         escrow_transaction_id: tx.id,
         description: `Escrow release: ${tx.item_description.substring(0, 100)}`,
+        currency: sellerWallet?.currency,
       });
 
       const buyerWalletId = (tx.metadata as any)?.sender_wallet_id;
       if (buyerWalletId) await WalletModel.debitEscrow(client, buyerWalletId, tx.amount);
       await WalletModel.debitEscrow(client, sellerWalletId, tx.amount);
 
-      return tx;
+      return { ...tx, currency: sellerWallet?.currency || 'GHS' };
     });
 
     await AuditLogModel.log({
@@ -298,7 +306,8 @@ export const escrowService = {
       socketService.emitToUser(id, 'transaction:updated', { id: escrowId });
     }
 
-    await notifyUser(sellerId, 'Escrow Completed', `₦${escrowTx.amount} has been released to your wallet.`, '/secured/transaction-details', { id: escrowId });
+    const currSymbol = getCurrencySymbol(escrowTx.currency);
+    await notifyUser(sellerId, 'Escrow Completed', `${currSymbol}${escrowTx.amount} has been released to your wallet.`, '/secured/transaction-details', { id: escrowId });
     await notifyUser(buyerId, 'Escrow Completed', 'Transaction completed successfully.', '/secured/transaction-details', { id: escrowId });
   },
 
@@ -385,6 +394,7 @@ export const escrowService = {
 
       if (resolution === 'refund') {
         if (!buyerWalletId) throw new AppError('Buyer wallet ID not found in metadata', 500);
+        const buyerWallet = await WalletModel.findById(buyerWalletId);
         const balanceResult = await WalletModel.creditBalance(client, buyerWalletId, escrowTx.amount);
         await WalletTransactionModel.create(client, {
           wallet_id: buyerWalletId,
@@ -396,11 +406,13 @@ export const escrowService = {
           reference: `${escrowTx.reference}_refund`,
           escrow_transaction_id: escrowTx.id,
           description: "Escrow refund — dispute resolved in buyer's favor",
+          currency: buyerWallet?.currency,
         });
         await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'refunded');
         await DisputeModel.updateStatus(client, dispute.id, 'resolved_refund', adminId, adminNotes);
       } else {
         if (!sellerWalletId) throw new AppError('Seller wallet ID not found in metadata', 500);
+        const sellerWallet = await WalletModel.findById(sellerWalletId);
         const balanceResult = await WalletModel.creditBalance(client, sellerWalletId, escrowTx.amount);
         await WalletTransactionModel.create(client, {
           wallet_id: sellerWalletId,
@@ -412,6 +424,7 @@ export const escrowService = {
           reference: `${escrowTx.reference}_release`,
           escrow_transaction_id: escrowTx.id,
           description: "Escrow release — dispute resolved in seller's favor",
+          currency: sellerWallet?.currency,
         });
         await EscrowTransactionModel.updateStatus(client, escrowTx.id, 'completed');
         await DisputeModel.updateStatus(client, dispute.id, 'resolved_release', adminId, adminNotes);

@@ -16,6 +16,7 @@ import walletRoutes from "./features/wallet/walletRoutes";
 import escrowRoutes from "./features/escrow/escrowRoutes";
 import paymentMethodRoutes from "./features/paymentMethod/paymentMethodRoutes";
 import transactionRoutes from "./features/transaction/transactionRoutes";
+import ratingRoutes from "./features/rating/ratingRoutes";
 import webhookRoutes from "./features/webhook/webhookRoutes";
 
 const app = express();
@@ -47,6 +48,7 @@ app.use("/api/v1/wallet", walletRoutes);
 app.use("/api/v1/escrow", escrowRoutes);
 app.use("/api/v1/transactions", transactionRoutes);
 app.use("/api/v1/payment-methods", paymentMethodRoutes);
+app.use("/api/v1/ratings", ratingRoutes);
 app.use("/api/v1/otp", otpRoutes);
 app.use("/api/v1/admin", adminRoutes);
 

@@ -16,6 +16,12 @@ router.get("/", paymentMethodController.getPaymentMethods);
 // GET /api/v1/payment-methods/banks - List supported banks
 router.get("/banks", paymentMethodController.listBanks);
 
+// POST /api/v1/payment-methods/verify-account - Verify bank/mobile money account via Paystack
+router.post(
+  "/verify-account",
+  paymentMethodController.verifyAccount,
+);
+
 // POST /api/v1/payment-methods/bank - Add bank account
 router.post(
   "/bank",

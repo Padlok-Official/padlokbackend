@@ -4,7 +4,7 @@ import { AppError } from '../utils/AppError';
 
 export const errorHandler = (
   err: Error & { statusCode?: number },
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction
 ): Response => {
@@ -15,7 +15,19 @@ export const errorHandler = (
       : err.message;
 
   if (statusCode >= 500) {
-    logger.error({ data: err }, 'Server error');
+    logger.error(
+      {
+        err,
+        method: req.method,
+        url: req.originalUrl,
+      },
+      `${req.method} ${req.originalUrl} failed: ${err.message}`,
+    );
+  } else if (statusCode >= 400) {
+    logger.warn(
+      { statusCode, method: req.method, url: req.originalUrl },
+      `${req.method} ${req.originalUrl} → ${statusCode}: ${err.message}`,
+    );
   }
 
   const extra = err instanceof AppError ? err.extra : undefined;

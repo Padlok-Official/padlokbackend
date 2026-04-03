@@ -1,6 +1,7 @@
 import { UserModel, WalletModel } from '../../models';
 import cloudinaryService from '../../infrastructure/cloudinary/cloudinaryService';
 import { AppError } from '../../utils/AppError';
+import { getPhoneCountryPrefix } from '../../utils/currencyUtils';
 
 export const userService = {
   async getProfile(userId: string) {
@@ -68,8 +69,9 @@ export const userService = {
     await UserModel.updatePassword(userId, await UserModel.hashPassword(newPassword));
   },
 
-  async searchUsers(query: string, excludeUserId: string) {
+  async searchUsers(query: string, excludeUserId: string, userPhoneNumber?: string) {
     if (!query?.trim()) throw new AppError('Search query is required', 400);
-    return UserModel.search(query, excludeUserId);
+    const countryPrefix = userPhoneNumber ? getPhoneCountryPrefix(userPhoneNumber) : null;
+    return UserModel.search(query, excludeUserId, countryPrefix);
   },
 };

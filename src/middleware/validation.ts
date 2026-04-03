@@ -9,6 +9,7 @@ export const handleValidationErrors = (
 ): Response | void => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
+    console.log('[VALIDATION_DEBUG] path:', req.path, 'body:', JSON.stringify(req.body), 'errors:', JSON.stringify(errors.array()));
     return res.status(400).json({
       success: false,
       message: 'Validation failed',

@@ -35,7 +35,7 @@ export const updateFcmToken = async (req: AuthenticatedRequest, res: Response, n
 
 export const searchUsers = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void | Response> => {
   try {
-    const users = await userService.searchUsers(req.query.q as string, req.user!.id);
+    const users = await userService.searchUsers(req.query.q as string, req.user!.id, req.user!.phone_number);
     return ok(res, users);
   } catch (err) { next(err); }
 };

@@ -5,15 +5,16 @@ import { ok, paginated, getRequestMeta } from '../../utils/respond';
 
 export const initiateEscrow = async (req: WalletRequest, res: Response, next: NextFunction): Promise<void | Response> => {
   try {
-    const { seller_email, item_description, item_photos, price } = req.body;
+    const { seller_email, item_title, item_description, item_photos, price } = req.body;
     const data = await escrowService.initiateEscrow({
       buyerId: req.user!.id,
       buyerName: req.user!.name,
       buyerWallet: req.wallet!,
       sellerEmail: seller_email,
+      itemTitle: item_title,
       itemDescription: item_description,
       itemPhotos: item_photos,
-      price,
+      price: Number(price),
       meta: getRequestMeta(req),
     });
     return ok(res, data, 'Escrow transaction initiated. Awaiting seller to set delivery window.', 201);

@@ -34,7 +34,7 @@ export const WalletTransactionModel = {
         data.fee || '0',
         data.balance_before,
         data.balance_after,
-        data.currency || 'NGN',
+        data.currency || 'GHS',
         data.status,
         data.reference,
         data.paystack_reference || null,

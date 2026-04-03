@@ -21,8 +21,8 @@ export const authLimiter = rateLimit({
 
 export const walletTransactionLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 5,
-  message: { success: false, message: 'Too many transaction attempts. Please wait.' },
+  max: 15,
+  message: { success: false, message: 'Too many transaction attempts. Please wait a moment and try again.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
