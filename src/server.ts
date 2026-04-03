@@ -5,6 +5,7 @@ import app from "./app";
 import db from "./config/database";
 import socketService from "./infrastructure/socket/socketService";
 import { setupPaystackWorker } from "./workers/paystackWorker";
+import { notificationWorker } from "./infrastructure/notification/notificationQueue";
 
 const PORT = Number(process.env.PORT) || 6000;
 
@@ -37,12 +38,14 @@ async function startServer(): Promise<void> {
 
     await socketService.initialize(server);
 
-    const worker = setupPaystackWorker();
+    const paystackWorkerInstance = setupPaystackWorker();
+    const notificationWorkerInstance = notificationWorker.start();
 
     const shutdown = (signal: string) => {
       logger.info(`${signal} received, shutting down gracefully...`);
       server.close(async () => {
-        await worker.close();
+        await paystackWorkerInstance.close();
+        await notificationWorkerInstance.close();
         await db.disconnect();
         process.exit(0);
       });

@@ -16,7 +16,7 @@ function getConnection(): IORedis {
             lazyConnect: true,
         });
         connection.on('error', (err) => {
-            logger.error(`Redis connection error: `);
+            logger.error({ err }, 'Redis connection error');
         });
     }
     return connection;
