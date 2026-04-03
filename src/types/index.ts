@@ -91,7 +91,8 @@ export interface EscrowTransaction {
   delivery_confirmed_at?: Date;
   delivery_deadline?: Date;
   receiver_confirmed_at?: Date; // formerly buyer_confirmed_at in EscrowTransaction, but Transaction uses receiver_confirmed_at
-  item_description: string;
+  item_title?: string;
+  item_description?: string;
   item_photos: string[];
   metadata?: Record<string, unknown>;
   created_at: Date;

@@ -159,7 +159,7 @@ export const escrowService = {
         status: 'completed',
         reference: `${escrowTx.reference}_lock`,
         escrow_transaction_id: escrowTx.id,
-        description: `Escrow payment for: ${escrowTx.item_description.substring(0, 100)}`,
+        description: `Escrow payment for: ${(escrowTx.item_title || escrowTx.item_description || 'N/A').substring(0, 100)}`,
         currency: buyerWallet.currency,
       });
 
@@ -274,7 +274,7 @@ export const escrowService = {
         status: 'completed',
         reference: `${tx.reference}_release`,
         escrow_transaction_id: tx.id,
-        description: `Escrow release: ${tx.item_description.substring(0, 100)}`,
+        description: `Escrow release: ${(tx.item_title || tx.item_description || 'N/A').substring(0, 100)}`,
         currency: sellerWallet?.currency,
       });
 
