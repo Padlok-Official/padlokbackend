@@ -33,6 +33,7 @@ export const fundWallet = async (req: WalletRequest, res: Response, next: NextFu
       email: req.user!.email,
       walletId: req.wallet!.id,
       walletBalance: req.wallet!.balance,
+      walletCurrency: req.wallet!.currency,
       amount: req.body.amount,
       callbackUrl: req.body.callback_url,
       ...getRequestMeta(req),
@@ -58,6 +59,7 @@ export const withdraw = async (req: WalletRequest, res: Response, next: NextFunc
     const data = await walletService.withdraw({
       userId: req.user!.id,
       walletId: req.wallet!.id,
+      walletCurrency: req.wallet!.currency,
       amount: req.body.amount,
       paymentMethodId: req.body.payment_method_id,
       ...getRequestMeta(req),

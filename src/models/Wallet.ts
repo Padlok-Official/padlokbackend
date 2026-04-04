@@ -81,22 +81,15 @@ export const WalletModel = {
     walletId: string,
     amount: string
   ): Promise<{ balance_before: string; balance_after: string }> {
-    const { rows: [wallet] } = await client.query<{ balance: string }>(
-      `SELECT balance FROM wallets WHERE id = $1 FOR UPDATE`,
-      [walletId]
-    );
-
-    if (!wallet) throw new Error('Wallet not found');
-
-    const balanceBefore = wallet.balance;
-
-    const { rows: [updated] } = await client.query<{ balance: string }>(
-      `UPDATE wallets SET balance = balance + $1, updated_at = NOW()
-       WHERE id = $2 RETURNING balance`,
+    const { rows: [result] } = await client.query<{ balance_before: string; balance_after: string }>(
+      `UPDATE wallets SET balance = balance + $1::DECIMAL, updated_at = NOW()
+       WHERE id = $2
+       RETURNING (balance - $1::DECIMAL)::TEXT as balance_before, balance::TEXT as balance_after`,
       [amount, walletId]
     );
 
-    return { balance_before: balanceBefore, balance_after: updated.balance };
+    if (!result) throw new Error('Wallet not found');
+    return result;
   },
 
   /**
@@ -109,30 +102,25 @@ export const WalletModel = {
     walletId: string,
     amount: string
   ): Promise<{ balance_before: string; balance_after: string }> {
-    const { rows: [wallet] } = await client.query<{ balance: string }>(
-      `SELECT balance FROM wallets WHERE id = $1 FOR UPDATE`,
-      [walletId]
-    );
-
-    if (!wallet) throw new Error('Wallet not found');
-
-    const balanceBefore = parseFloat(wallet.balance);
-    const debitAmount = parseFloat(amount);
-
-    if (balanceBefore < debitAmount) {
-      throw new Error('Insufficient wallet balance');
-    }
-
-    const { rows: [updated] } = await client.query<{ balance: string }>(
-      `UPDATE wallets SET balance = balance - $1,
-              daily_spent = daily_spent + $1,
-              monthly_spent = monthly_spent + $1,
+    const { rows: [result] } = await client.query<{ balance_before: string; balance_after: string }>(
+      `UPDATE wallets SET
+              balance = balance - $1::DECIMAL,
+              daily_spent = daily_spent + $1::DECIMAL,
+              monthly_spent = monthly_spent + $1::DECIMAL,
               updated_at = NOW()
-       WHERE id = $2 RETURNING balance`,
+       WHERE id = $2 AND balance >= $1::DECIMAL
+       RETURNING (balance + $1::DECIMAL)::TEXT as balance_before, balance::TEXT as balance_after`,
       [amount, walletId]
     );
 
-    return { balance_before: wallet.balance, balance_after: updated.balance };
+    if (!result) {
+      // Distinguish between wallet not found vs insufficient balance
+      const { rows } = await client.query(`SELECT id FROM wallets WHERE id = $1`, [walletId]);
+      if (!rows[0]) throw new Error('Wallet not found');
+      throw new Error('Insufficient wallet balance');
+    }
+
+    return result;
   },
 
   /**
@@ -143,26 +131,28 @@ export const WalletModel = {
     walletId: string,
     amount: string
   ): Promise<void> {
-    await client.query(
-      `UPDATE wallets SET escrow_balance = escrow_balance + $1, updated_at = NOW()
+    const { rowCount } = await client.query(
+      `UPDATE wallets SET escrow_balance = escrow_balance + $1::DECIMAL, updated_at = NOW()
        WHERE id = $2`,
       [amount, walletId]
     );
+    if (!rowCount) throw new Error('Wallet not found');
   },
 
   /**
-   * Debit escrow balance.
+   * Debit escrow balance. Prevents going negative.
    */
   async debitEscrow(
     client: PoolClient,
     walletId: string,
     amount: string
   ): Promise<void> {
-    await client.query(
-      `UPDATE wallets SET escrow_balance = escrow_balance - $1, updated_at = NOW()
-       WHERE id = $2`,
+    const { rowCount } = await client.query(
+      `UPDATE wallets SET escrow_balance = escrow_balance - $1::DECIMAL, updated_at = NOW()
+       WHERE id = $2 AND escrow_balance >= $1::DECIMAL`,
       [amount, walletId]
     );
+    if (!rowCount) throw new Error('Insufficient escrow balance or wallet not found');
   },
 
   async resetSpendingIfNeeded(client: PoolClient, walletId: string): Promise<void> {
@@ -181,30 +171,21 @@ export const WalletModel = {
     walletId: string,
     amount: string
   ): Promise<{ allowed: boolean; reason?: string }> {
-    const { rows } = await db.query<WalletWithPin>(
-      `SELECT daily_limit, monthly_limit, daily_spent, monthly_spent,
-              daily_spent_reset_at, monthly_spent_reset_at
+    const { rows } = await db.query<{
+      daily_ok: boolean;
+      monthly_ok: boolean;
+    }>(
+      `SELECT
+        (CASE WHEN daily_spent_reset_at < CURRENT_DATE THEN 0 ELSE daily_spent END) + $2::DECIMAL <= daily_limit AS daily_ok,
+        (CASE WHEN monthly_spent_reset_at < DATE_TRUNC('month', CURRENT_DATE) THEN 0 ELSE monthly_spent END) + $2::DECIMAL <= monthly_limit AS monthly_ok
        FROM wallets WHERE id = $1`,
-      [walletId]
+      [walletId, amount]
     );
 
     if (!rows[0]) return { allowed: false, reason: 'Wallet not found' };
 
-    const wallet = rows[0];
-    const amountNum = parseFloat(amount);
-
-    const today = new Date().toISOString().split('T')[0];
-    const dailySpent = wallet.daily_spent_reset_at < today ? 0 : parseFloat(wallet.daily_spent);
-    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
-    const monthlySpent = wallet.monthly_spent_reset_at < monthStart ? 0 : parseFloat(wallet.monthly_spent);
-
-    if (dailySpent + amountNum > parseFloat(wallet.daily_limit)) {
-      return { allowed: false, reason: 'Daily spending limit exceeded' };
-    }
-
-    if (monthlySpent + amountNum > parseFloat(wallet.monthly_limit)) {
-      return { allowed: false, reason: 'Monthly spending limit exceeded' };
-    }
+    if (!rows[0].daily_ok) return { allowed: false, reason: 'Daily spending limit exceeded' };
+    if (!rows[0].monthly_ok) return { allowed: false, reason: 'Monthly spending limit exceeded' };
 
     return { allowed: true };
   },

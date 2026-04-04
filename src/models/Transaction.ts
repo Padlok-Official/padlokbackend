@@ -171,14 +171,10 @@ export const TransactionModel = {
 
     const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-    const countResult = await db.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM transactions t ${whereClause}`,
-      values
-    );
-
     const dataValues = [...values, limit, offset];
-    const { rows } = await db.query<Transaction>(
+    const { rows } = await db.query<Transaction & { _total: string }>(
       `SELECT t.*,
+              COUNT(*) OVER() AS _total,
               u_sender.name as sender_name,
               u_sender.profile_photo as sender_photo,
               u_receiver.name as receiver_name,
@@ -193,7 +189,7 @@ export const TransactionModel = {
 
     return {
       transactions: rows,
-      total: parseInt(countResult.rows[0].count, 10),
+      total: rows.length > 0 ? parseInt(rows[0]._total, 10) : 0,
     };
   },
 
@@ -230,21 +226,16 @@ export const TransactionModel = {
 
     const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-    const countResult = await db.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM transactions ${whereClause}`,
-      values
-    );
-
     const dataValues = [...values, limit, offset];
-    const { rows } = await db.query<Transaction>(
-      `SELECT * FROM transactions ${whereClause}
+    const { rows } = await db.query<Transaction & { _total: string }>(
+      `SELECT *, COUNT(*) OVER() AS _total FROM transactions ${whereClause}
        ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       dataValues
     );
 
     return {
       transactions: rows,
-      total: parseInt(countResult.rows[0].count, 10),
+      total: rows.length > 0 ? parseInt(rows[0]._total, 10) : 0,
     };
   },
 };
