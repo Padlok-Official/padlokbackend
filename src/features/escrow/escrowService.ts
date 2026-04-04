@@ -1,4 +1,3 @@
-import logger from "../../utils/logger";
 import { v4 as uuidv4 } from "uuid";
 import {
   AuditLogModel,
@@ -9,34 +8,17 @@ import {
   WalletTransactionModel,
 } from "../../models";
 import cloudinaryService from "../../infrastructure/cloudinary/cloudinaryService";
-import { NotificationService } from "../../infrastructure/notification/notificationService";
 import socketService from "../../infrastructure/socket/socketService";
+import { inAppNotificationService } from "../notification/inAppNotificationService";
 import { withTransaction } from "../../utils/withTransaction";
 import { AppError } from "../../utils/AppError";
-import { Wallet } from "../../types";
+import { Wallet, NotificationType } from "../../types";
 import { getCurrencySymbol } from "../../utils/currencyUtils";
 
 type Meta = {
   ip_address?: string | undefined;
   user_agent?: string | undefined;
 };
-
-async function notifyUser(
-  userId: string,
-  title: string,
-  body: string,
-  screen: string,
-  params?: Record<string, string>,
-) {
-  try {
-    await NotificationService.sendToUser(userId, title, body, {
-      screen,
-      params,
-    });
-  } catch (err) {
-    logger.error({ err, userId }, "Failed to send push notification");
-  }
-}
 
 const DELIVERY_HOURS_ALLOWED = [1, 2, 3, 6, 12, 24, 48, 72];
 const PLATFORM_FEE_RATE = 0.03;
@@ -124,13 +106,13 @@ export const escrowService = {
       id: escrowTx.id,
     });
 
-    await notifyUser(
-      seller.id,
-      "New Escrow Request",
-      `${buyerName} wants to buy "${itemTitle}" for ${getCurrencySymbol(buyerWallet.currency)}${price}`,
-      "/secured/transaction-details",
-      { id: escrowTx.id },
-    );
+    await inAppNotificationService.notify({
+      userId: seller.id,
+      type: NotificationType.ESCROW_INITIATED,
+      title: "New Escrow Request",
+      body: `${buyerName} wants to buy "${itemTitle}" for ${getCurrencySymbol(buyerWallet.currency)}${price}`,
+      data: { screen: "/secured/transaction-details", params: { id: escrowTx.id } },
+    });
 
     return { ...escrowTx, price, fee, seller_email: sellerEmail };
   },
@@ -262,13 +244,13 @@ export const escrowService = {
     socketService.emitToUser(buyerId, "wallet:updated", {});
     socketService.emitToUser(buyerId, "transaction:updated", { id: escrowId });
 
-    await notifyUser(
-      buyerId,
-      "Escrow Funded",
-      `${getCurrencySymbol(result.currency)}${result.price} is now locked in escrow. Delivery window: ${deliveryWindowLabel}.`,
-      "/secured/transaction-details",
-      { id: escrowId },
-    );
+    await inAppNotificationService.notify({
+      userId: buyerId,
+      type: NotificationType.ESCROW_FUNDED,
+      title: "Escrow Funded",
+      body: `${getCurrencySymbol(result.currency)}${result.price} is now locked in escrow. Delivery window: ${deliveryWindowLabel}.`,
+      data: { screen: "/secured/transaction-details", params: { id: escrowId } },
+    });
 
     return {
       delivery_deadline: result.deliveryDeadline,
@@ -324,13 +306,13 @@ export const escrowService = {
     socketService.emitToUser(buyerId, "transaction:updated", { id: escrowId });
     socketService.emitToUser(userId, "transaction:updated", { id: escrowId });
 
-    await notifyUser(
-      buyerId,
-      "Delivery Confirmed",
-      "Seller has confirmed delivery. Please confirm receipt or raise a dispute.",
-      "/secured/transaction-details",
-      { id: escrowId },
-    );
+    await inAppNotificationService.notify({
+      userId: buyerId,
+      type: NotificationType.ESCROW_DELIVERY_CONFIRMED,
+      title: "Delivery Confirmed",
+      body: "Seller has confirmed delivery. Please confirm receipt or raise a dispute.",
+      data: { screen: "/secured/transaction-details", params: { id: escrowId } },
+    });
 
     return { delivery_deadline: escrowTx.delivery_deadline };
   },
@@ -416,13 +398,20 @@ export const escrowService = {
     }
 
     const currSymbol = getCurrencySymbol(escrowTx.currency);
-    await notifyUser(
-      sellerId,
-      "Escrow Completed",
-      `${currSymbol}${Number(escrowTx.amount).toFixed(2)} has been released to your wallet.`,
-      "/secured/transaction-details",
-      { id: escrowId },
-    );
+    await inAppNotificationService.notify({
+      userId: sellerId,
+      type: NotificationType.ESCROW_COMPLETED,
+      title: "Escrow Completed",
+      body: `${currSymbol}${Number(escrowTx.amount).toFixed(2)} has been released to your wallet.`,
+      data: { screen: "/secured/transaction-details", params: { id: escrowId } },
+    });
+    await inAppNotificationService.notify({
+      userId: buyerId,
+      type: NotificationType.ESCROW_COMPLETED,
+      title: "Escrow Completed",
+      body: "Transaction completed successfully.",
+      data: { screen: "/secured/transaction-details", params: { id: escrowId } },
+    });
   },
 
   async raiseDispute(params: {
@@ -474,13 +463,13 @@ export const escrowService = {
       raised_by: userName,
     });
 
-    await notifyUser(
-      otherUserId,
-      "Dispute Raised",
-      `${userName} raised a dispute: "${reason}"`,
-      "/secured/transaction-details",
-      { id: escrowId },
-    );
+    await inAppNotificationService.notify({
+      userId: otherUserId,
+      type: NotificationType.ESCROW_DISPUTED,
+      title: "Dispute Raised",
+      body: `${userName} raised a dispute: "${reason}"`,
+      data: { screen: "/secured/transaction-details", params: { id: escrowId } },
+    });
 
     await AuditLogModel.log({
       user_id: userId,
@@ -521,13 +510,13 @@ export const escrowService = {
     socketService.emitToUser(sellerId, "transaction:updated", { id: escrowId });
     socketService.emitToUser(userId, "transaction:updated", { id: escrowId });
 
-    await notifyUser(
-      sellerId,
-      "Escrow Cancelled",
-      "The buyer has cancelled the escrow transaction.",
-      "/secured/transaction-details",
-      { id: escrowId },
-    );
+    await inAppNotificationService.notify({
+      userId: sellerId,
+      type: NotificationType.ESCROW_CANCELLED,
+      title: "Escrow Cancelled",
+      body: "The buyer has cancelled the escrow transaction.",
+      data: { screen: "/secured/transaction-details", params: { id: escrowId } },
+    });
   },
 
   async resolveDispute(params: {
@@ -652,13 +641,13 @@ export const escrowService = {
       });
       socketService.emitToUser(id, "wallet:updated", {});
       socketService.emitToUser(id, "transaction:updated", { id: escrowTx.id });
-      await notifyUser(
-        id,
-        "Dispute Resolved",
-        msg,
-        "/secured/transaction-details",
-        { id: escrowTx.id },
-      );
+      await inAppNotificationService.notify({
+        userId: id,
+        type: NotificationType.ESCROW_DISPUTE_RESOLVED,
+        title: "Dispute Resolved",
+        body: msg,
+        data: { screen: "/secured/transaction-details", params: { id: escrowTx.id } },
+      });
     }
 
     await AuditLogModel.log({

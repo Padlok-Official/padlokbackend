@@ -2,6 +2,7 @@ import logger from '../../utils/logger';
 import { Server as SocketServer } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import { createAdapter } from '@socket.io/redis-adapter';
+import { createRedisClient } from '../../config/redis';
 import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
 import { UserModel } from '../../models';
@@ -15,7 +16,7 @@ export class SocketService {
   private pubClient: Redis | null = null;
   private subClient: Redis | null = null;
 
-  private constructor() { }
+  private constructor() {}
 
   public static getInstance(): SocketService {
     if (!SocketService.instance) {
@@ -27,19 +28,20 @@ export class SocketService {
   public async initialize(httpServer: HttpServer): Promise<void> {
     this.io = new SocketServer(httpServer, {
       cors: {
-        origin: '*', // Adjust this in production
+        origin: '*',
         methods: ['GET', 'POST'],
       },
+      pingTimeout: 30000,
+      pingInterval: 25000,
     });
 
-    // Setup Redis adapter for scalability
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    this.pubClient = new Redis(redisUrl);
-    this.subClient = this.pubClient.duplicate();
+    // Reuse shared Redis config with retry strategy
+    this.pubClient = createRedisClient();
+    this.subClient = createRedisClient();
 
     this.io.adapter(createAdapter(this.pubClient, this.subClient));
 
-    // Middleware for authentication
+    // Authentication middleware
     this.io.use(async (socket, next) => {
       try {
         const token = socket.handshake.auth.token || socket.handshake.headers['authorization'];
@@ -50,7 +52,7 @@ export class SocketService {
 
         const decoded = jwt.verify(
           token.replace('Bearer ', ''),
-          process.env.JWT_SECRET || 'secret'
+          process.env.JWT_SECRET || 'secret',
         ) as { userId: string };
 
         const user = await UserModel.findById(decoded.userId);
@@ -69,8 +71,6 @@ export class SocketService {
     this.io.on('connection', (socket) => {
       const user = (socket as any).user;
       logger.info(`User connected: ${user.id} (${user.email})`);
-
-      // Join a room specific to this user
       socket.join(`user_${user.id}`);
 
       socket.on('disconnect', () => {
@@ -103,6 +103,24 @@ export class SocketService {
     if (!this.io) return false;
     const room = this.io.sockets.adapter.rooms.get(`user_${userId}`);
     return !!room && room.size > 0;
+  }
+
+  public async close(): Promise<void> {
+    if (this.io) {
+      // Disconnect all sockets gracefully
+      this.io.disconnectSockets(true);
+      this.io.close();
+      this.io = null;
+    }
+    if (this.pubClient) {
+      this.pubClient.disconnect();
+      this.pubClient = null;
+    }
+    if (this.subClient) {
+      this.subClient.disconnect();
+      this.subClient = null;
+    }
+    logger.info('Socket.io closed');
   }
 }
 

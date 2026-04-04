@@ -22,9 +22,10 @@ class Database {
 
       config = {
         connectionString,
-        max: 20,
+        max: parseInt(process.env.DB_POOL_MAX || '40', 10),
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
+        connectionTimeoutMillis: 15000,
+        statement_timeout: 30000,
         ...((isSupabase || isRailway) && {
           ssl: { rejectUnauthorized: false },
         }),
@@ -37,9 +38,10 @@ class Database {
         database: process.env.DB_NAME || 'postgres',
         user: process.env.DB_USER || 'postgres',
         password: process.env.DB_PASSWORD,
-        max: 20,
+        max: parseInt(process.env.DB_POOL_MAX || '40', 10),
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
+        connectionTimeoutMillis: 15000,
+        statement_timeout: 30000,
         ...(useSsl && {
           ssl: {
             rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',

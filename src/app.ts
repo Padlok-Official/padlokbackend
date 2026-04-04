@@ -17,6 +17,7 @@ import escrowRoutes from "./features/escrow/escrowRoutes";
 import paymentMethodRoutes from "./features/paymentMethod/paymentMethodRoutes";
 import transactionRoutes from "./features/transaction/transactionRoutes";
 import ratingRoutes from "./features/rating/ratingRoutes";
+import notificationRoutes from "./features/notification/notificationRoutes";
 import webhookRoutes from "./features/webhook/webhookRoutes";
 
 const app = express();
@@ -36,8 +37,8 @@ app.use(
   }),
 );
 app.use(compression() as unknown as express.RequestHandler);
-app.use(express.json({ limit: "100mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(cookieParser());
 app.use(pinoHttp({ logger }));
 app.use(generalLimiter);
@@ -49,6 +50,7 @@ app.use("/api/v1/escrow", escrowRoutes);
 app.use("/api/v1/transactions", transactionRoutes);
 app.use("/api/v1/payment-methods", paymentMethodRoutes);
 app.use("/api/v1/ratings", ratingRoutes);
+app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/otp", otpRoutes);
 app.use("/api/v1/admin", adminRoutes);
 

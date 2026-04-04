@@ -1,31 +1,15 @@
 import logger from '../../utils/logger';
 import { Queue, Worker, Job } from 'bullmq';
-import IORedis from 'ioredis';
+import { redisConnection } from '../../config/redis';
 import admin from '../../config/firebaseConfig';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-
-let connection: IORedis | null = null;
 let queue: Queue | null = null;
 let worker: Worker | null = null;
-
-function getConnection(): IORedis {
-    if (!connection) {
-        connection = new IORedis(REDIS_URL, {
-            maxRetriesPerRequest: null,
-            lazyConnect: true,
-        });
-        connection.on('error', (err) => {
-            logger.error({ err }, 'Redis connection error');
-        });
-    }
-    return connection;
-}
 
 function getQueue(): Queue {
     if (!queue) {
         queue = new Queue('notifications', {
-            connection: getConnection() as any,
+            connection: redisConnection as any,
             defaultJobOptions: {
                 attempts: 3,
                 backoff: {
@@ -50,33 +34,24 @@ function getWorker(): Worker {
                 if (!tokens || tokens.length === 0) return;
 
                 const message = {
-                    notification: {
-                        title,
-                        body,
-                    },
+                    notification: { title, body },
                     data: data || {},
                     tokens,
                 };
 
                 try {
                     const response = await admin.messaging().sendEachForMulticast(message);
-                    logger.info(`Successfully sent ${response.successCount} messages to batch ${job.id}`);
+                    logger.info(`Sent ${response.successCount} messages (batch ${job.id})`);
 
                     if (response.failureCount > 0) {
-                        const failedTokens: string[] = [];
-                        response.responses.forEach((resp, idx) => {
-                            if (!resp.success) {
-                                failedTokens.push(tokens[idx]);
-                            }
-                        });
-                        logger.warn(`Failed to send to ${response.failureCount} tokens in batch ${job.id}`);
+                        logger.warn(`Failed ${response.failureCount} tokens in batch ${job.id}`);
                     }
                 } catch (error) {
-                    logger.error({ err: error, jobId: job.id }, "Error sending batch");
+                    logger.error({ err: error, jobId: job.id }, 'Error sending batch');
                     throw error;
                 }
             },
-            { connection: getConnection() as any }
+            { connection: redisConnection as any },
         );
 
         worker.on('completed', (job) => {
@@ -84,7 +59,7 @@ function getWorker(): Worker {
         });
 
         worker.on('failed', (job, err) => {
-            logger.error(`Notification job ${job?.id} failed with error: ${err.message}`);
+            logger.error(`Notification job ${job?.id} failed: ${err.message}`);
         });
     }
     return worker;

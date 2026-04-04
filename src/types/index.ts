@@ -238,3 +238,29 @@ export interface PaystackWebhookEvent {
 export interface WalletRequest extends AuthenticatedRequest {
   wallet?: Wallet;
 }
+
+// ── In-App Notifications ────────────────────────────────────────
+
+export enum NotificationType {
+  ESCROW_INITIATED = 'escrow_initiated',
+  ESCROW_FUNDED = 'escrow_funded',
+  ESCROW_DELIVERY_CONFIRMED = 'escrow_delivery_confirmed',
+  ESCROW_COMPLETED = 'escrow_completed',
+  ESCROW_CANCELLED = 'escrow_cancelled',
+  ESCROW_DISPUTED = 'escrow_disputed',
+  ESCROW_DISPUTE_RESOLVED = 'escrow_dispute_resolved',
+  DEPOSIT_COMPLETED = 'deposit_completed',
+  WITHDRAWAL_COMPLETED = 'withdrawal_completed',
+  WITHDRAWAL_FAILED = 'withdrawal_failed',
+}
+
+export interface InAppNotification {
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, any>;
+  is_read: boolean;
+  created_at: Date;
+}

@@ -9,10 +9,10 @@ import {
   WalletModel,
   WalletTransactionModel,
 } from "../models";
-import { NotificationService } from "../infrastructure/notification/notificationService";
 import { paystackService } from "../infrastructure/paystack/paystackService";
 import socketService from "../infrastructure/socket/socketService";
-import { PaystackWebhookEvent } from "../types";
+import { inAppNotificationService } from "../features/notification/inAppNotificationService";
+import { PaystackWebhookEvent, NotificationType } from "../types";
 import { getCurrencySymbol } from "../utils/currencyUtils";
 
 export const setupPaystackWorker = () => {
@@ -54,24 +54,6 @@ export const setupPaystackWorker = () => {
 
   return worker;
 };
-
-async function notifyUser(
-  userId: string,
-  title: string,
-  body: string,
-  navigationPayload?: { screen: string; params?: any },
-): Promise<void> {
-  try {
-    await NotificationService.sendToUser(
-      userId,
-      title,
-      body,
-      navigationPayload,
-    );
-  } catch (err) {
-    logger.error({ err, userId }, "Failed to send push notification");
-  }
-}
 
 async function getWalletOwner(walletId: string): Promise<{ user_id: string; currency: string } | null> {
   const { rows } = await db.query<{ user_id: string; currency: string }>(
@@ -139,14 +121,13 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
           socketService.emitToUser(walletInfo.user_id, "transaction:updated", {
             type: "deposit",
           });
-          await notifyUser(
-            walletInfo.user_id,
-            "Deposit Successful",
-            `${symbol}${amountInNaira} has been added to your wallet.`,
-            {
-              screen: "/secured/(tabs)",
-            },
-          );
+          await inAppNotificationService.notify({
+            userId: walletInfo.user_id,
+            type: NotificationType.DEPOSIT_COMPLETED,
+            title: "Deposit Successful",
+            body: `${symbol}${amountInNaira} has been added to your wallet.`,
+            data: { screen: "/secured/(tabs)" },
+          });
         }
 
         await AuditLogModel.log({
@@ -206,15 +187,13 @@ async function handleChargeSuccess(event: PaystackWebhookEvent): Promise<void> {
           type: "deposit",
           status: "completed",
         });
-        await notifyUser(
-          transaction.user_id,
-          "Deposit Successful",
-          `${amountInNaira} has been added to your wallet.`,
-          {
-            screen: "/secured/transaction-details",
-            params: { id: transaction.id },
-          },
-        );
+        await inAppNotificationService.notify({
+          userId: transaction.user_id,
+          type: NotificationType.DEPOSIT_COMPLETED,
+          title: "Deposit Successful",
+          body: `${amountInNaira} has been added to your wallet.`,
+          data: { screen: "/secured/transaction-details", params: { id: transaction.id } },
+        });
 
         await AuditLogModel.log({
           action: "deposit_completed",
@@ -263,14 +242,13 @@ async function handleTransferSuccess(
           type: "withdrawal",
           status: "completed",
         });
-        await notifyUser(
-          walletInfo.user_id,
-          "Withdrawal Successful",
-          `${symbol}${walletTx.amount} has been sent to your bank account.`,
-          {
-            screen: "/secured/(tabs)",
-          },
-        );
+        await inAppNotificationService.notify({
+          userId: walletInfo.user_id,
+          type: NotificationType.WITHDRAWAL_COMPLETED,
+          title: "Withdrawal Successful",
+          body: `${symbol}${walletTx.amount} has been sent to your bank account.`,
+          data: { screen: "/secured/(tabs)" },
+        });
       }
 
       await AuditLogModel.log({
@@ -313,15 +291,13 @@ async function handleTransferSuccess(
         type: "withdrawal",
         status: "completed",
       });
-      await notifyUser(
-        transaction.user_id,
-        "Withdrawal Successful",
-        `${txSymbol}${transaction.amount} has been sent to your bank account.`,
-        {
-          screen: "/secured/transaction-details",
-          params: { id: transaction.id },
-        },
-      );
+      await inAppNotificationService.notify({
+        userId: transaction.user_id,
+        type: NotificationType.WITHDRAWAL_COMPLETED,
+        title: "Withdrawal Successful",
+        body: `${txSymbol}${transaction.amount} has been sent to your bank account.`,
+        data: { screen: "/secured/transaction-details", params: { id: transaction.id } },
+      });
 
       await AuditLogModel.log({
         action: "withdrawal_completed",
@@ -368,14 +344,13 @@ async function handleTransferFailed(
           type: "withdrawal",
           status: "failed",
         });
-        await notifyUser(
-          walletInfo.user_id,
-          "Withdrawal Failed",
-          `Your withdrawal of ${symbol}${walletTx.amount} failed. The amount has been refunded to your wallet.`,
-          {
-            screen: "/secured/(tabs)",
-          },
-        );
+        await inAppNotificationService.notify({
+          userId: walletInfo.user_id,
+          type: NotificationType.WITHDRAWAL_FAILED,
+          title: "Withdrawal Failed",
+          body: `Your withdrawal of ${symbol}${walletTx.amount} failed. The amount has been refunded to your wallet.`,
+          data: { screen: "/secured/(tabs)" },
+        });
       }
 
       await AuditLogModel.log({
@@ -421,15 +396,13 @@ async function handleTransferFailed(
         type: "withdrawal",
         status: "failed",
       });
-      await notifyUser(
-        transaction.user_id,
-        "Withdrawal Failed",
-        `Your withdrawal of ${failedSymbol}${transaction.amount} failed. The amount has been refunded to your wallet.`,
-        {
-          screen: "/secured/transaction-details",
-          params: { id: transaction.id },
-        },
-      );
+      await inAppNotificationService.notify({
+        userId: transaction.user_id,
+        type: NotificationType.WITHDRAWAL_FAILED,
+        title: "Withdrawal Failed",
+        body: `Your withdrawal of ${failedSymbol}${transaction.amount} failed. The amount has been refunded to your wallet.`,
+        data: { screen: "/secured/transaction-details", params: { id: transaction.id } },
+      });
 
       await AuditLogModel.log({
         action: "withdrawal_failed_reversed",
