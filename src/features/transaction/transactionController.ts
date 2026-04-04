@@ -12,6 +12,7 @@ export const initiateDeposit = async (req: WalletRequest, res: Response, next: N
       email: req.user!.email,
       walletId: req.wallet!.id,
       walletBalance: req.wallet!.balance,
+      walletCurrency: req.wallet!.currency,
       amount: req.body.amount,
       callbackUrl: req.body.callback_url,
       ...getRequestMeta(req),
@@ -25,6 +26,7 @@ export const initiateWithdrawal = async (req: WalletRequest, res: Response, next
     const data = await walletService.withdraw({
       userId: req.user!.id,
       walletId: req.wallet!.id,
+      walletCurrency: req.wallet!.currency,
       amount: req.body.amount,
       paymentMethodId: req.body.payment_method_id,
       ...getRequestMeta(req),
